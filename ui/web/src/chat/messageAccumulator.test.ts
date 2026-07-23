@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { accumulateChunk, finalizeMessage } from './messageAccumulator';
+import { accumulateChunk, finalizeMessage, markInterrupted } from './messageAccumulator';
 import type { Message } from '../product/types';
 
 describe('messageAccumulator', () => {
@@ -102,6 +102,46 @@ describe('messageAccumulator', () => {
     }
     if (result[1].role === 'assistant') {
       expect(result[1].isStreaming).toBe(false);
+    }
+  });
+
+  it('markInterrupted 停止流式光标但保留内容', () => {
+    const existing: Message[] = [
+      {
+        id: 'm1',
+        role: 'assistant',
+        content: 'partial',
+        isStreaming: true,
+        createdAt: '2026-01-01T00:00:00.000Z',
+      },
+    ];
+    const result = markInterrupted(existing, 'm1');
+    expect(result.length).toBe(1);
+    expect(result[0].role).toBe('assistant');
+    if (result[0].role === 'assistant') {
+      expect(result[0].content).toBe('partial');
+      expect(result[0].isStreaming).toBe(false);
+    }
+  });
+
+  it('markInterrupted messageId 为 null 时返回原数组', () => {
+    const existing: Message[] = [];
+    expect(markInterrupted(existing, null)).toBe(existing);
+  });
+
+  it('markInterrupted 不影响不匹配的消息', () => {
+    const existing: Message[] = [
+      {
+        id: 'm1',
+        role: 'assistant',
+        content: 'streaming',
+        isStreaming: true,
+        createdAt: '2026-01-01T00:00:00.000Z',
+      },
+    ];
+    const result = markInterrupted(existing, 'm-other');
+    if (result[0].role === 'assistant') {
+      expect(result[0].isStreaming).toBe(true);
     }
   });
 });

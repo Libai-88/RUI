@@ -218,6 +218,8 @@ export interface AcpAdapter {
   cancelSession(sessionId: SessionId): Promise<void>;
   /** 响应权限请求 */
   respondToPermission(sessionId: SessionId, requestId: PermissionRequestId, allowed: boolean): Promise<void>;
+  /** 重连（断线恢复时调用） */
+  reconnect?(): Promise<void>;
 }
 
 /** ACP 连接配置 */

@@ -37,3 +37,16 @@ export function finalizeMessage(
       : m,
   );
 }
+
+/** 标记消息为连接中断（停止流式光标但保留已接收内容） */
+export function markInterrupted(
+  messages: Message[],
+  messageId: MessageId | null,
+): Message[] {
+  if (!messageId) return messages;
+  return messages.map((m) =>
+    m.role === 'assistant' && m.id === messageId
+      ? { ...m, isStreaming: false }
+      : m,
+  );
+}

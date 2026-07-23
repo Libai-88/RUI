@@ -76,6 +76,7 @@ export interface AcpSessionNotification {
 /** Callbacks the ACP client invokes for inbound notifications */
 export interface AcpClientCallbacks {
   onSessionUpdate?(notification: AcpSessionNotification): void;
+  onDisconnect?(reason?: string): void;
 }
 
 /** 客户端工厂函数类型 */
@@ -96,6 +97,7 @@ export class WebAcpAdapter implements AcpAdapter {
   private stateManager = new ConnectionStateManager();
   private config: AcpConnectionConfig | null = null;
   private currentMessageId: string | null = null;
+  private currentSessionId: SessionId | null = null;
 
   constructor(private clientFactory: AcpClientFactory) {}
 
@@ -111,6 +113,7 @@ export class WebAcpAdapter implements AcpAdapter {
     try {
       this.client = this.clientFactory(baseUrl, {
         onSessionUpdate: (notification) => this.handleSessionUpdate(notification),
+        onDisconnect: (reason) => this.handleDisconnect(reason),
       });
       this.stateManager.tryTransition(states.connected());
       this.emit({ type: 'connection-state-changed', state: this.stateManager.getState() });
@@ -127,6 +130,11 @@ export class WebAcpAdapter implements AcpAdapter {
     this.config = null;
     this.stateManager.reset();
     this.emit({ type: 'connection-state-changed', state: this.stateManager.getState() });
+  }
+
+  async reconnect(): Promise<void> {
+    if (!this.config) throw new Error('无配置，无法重连');
+    await this.connect(this.config);
   }
 
   subscribe(listener: (event: AdapterEvent) => void): () => void {
@@ -192,6 +200,7 @@ export class WebAcpAdapter implements AcpAdapter {
     if (!this.client) throw new Error('ACP 未连接');
     const messageId = generateId('msg');
     this.currentMessageId = messageId;
+    this.currentSessionId = sessionId;
     this.stateManager.tryTransition(states.processing());
     try {
       await this.client.sessionPrompt({
@@ -201,6 +210,7 @@ export class WebAcpAdapter implements AcpAdapter {
       this.emit({ type: 'message-complete', sessionId, messageId });
     } finally {
       this.currentMessageId = null;
+      this.currentSessionId = null;
       this.stateManager.tryTransition(states.connected());
     }
     return messageId;
@@ -254,6 +264,21 @@ export class WebAcpAdapter implements AcpAdapter {
       messageId: this.currentMessageId,
       delta: update.content.text,
     });
+  }
+
+  /** 处理连接断开：发射 connection-interrupted 事件并切换状态 */
+  private handleDisconnect(_reason?: string): void {
+    if (this.currentMessageId && this.currentSessionId) {
+      this.emit({
+        type: 'connection-interrupted',
+        sessionId: this.currentSessionId,
+        messageId: this.currentMessageId,
+      });
+    }
+    this.currentMessageId = null;
+    this.currentSessionId = null;
+    this.stateManager.tryTransition(states.disconnected());
+    this.emit({ type: 'connection-state-changed', state: this.stateManager.getState() });
   }
 
   /** 转换 ACP 历史消息为 RUI 产品层消息 */

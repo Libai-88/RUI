@@ -27,6 +27,10 @@ export function createGooseClientFactory(): (
       })
       .catch(() => {});
 
+    client.closed
+      .then(() => callbacks.onDisconnect?.('connection closed'))
+      .catch(() => callbacks.onDisconnect?.('connection error'));
+
     return {
       newSession: (params) =>
         // eslint-disable-next-line @typescript-eslint/no-explicit-any

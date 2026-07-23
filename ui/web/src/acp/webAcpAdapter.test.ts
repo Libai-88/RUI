@@ -294,4 +294,101 @@ describe('WebAcpAdapter', () => {
     const chunks = events.filter((e) => e.type === 'message-chunk');
     expect(chunks.length).toBe(0);
   });
+
+  it('onDisconnect 发射 connection-interrupted 事件', async () => {
+    const events: AdapterEvent[] = [];
+    let capturedCallbacks: AcpClientCallbacks | null = null;
+    const discFactory: AcpClientFactory = (_url, callbacks) => {
+      capturedCallbacks = callbacks;
+      return mockClient;
+    };
+    const discAdapter = new WebAcpAdapter(discFactory);
+    discAdapter.subscribe((e) => events.push(e));
+    await discAdapter.connect({ endpoint: 'http://127.0.0.1:3000', workspace: '/tmp' });
+    await discAdapter.createSession({ path: '/tmp' });
+
+    let resolvePrompt!: () => void;
+    mockClient.sessionPrompt = vi.fn(
+      () => new Promise<void>((r) => { resolvePrompt = r; }),
+    );
+    const sendPromise = discAdapter.sendMessage('test-session-id', 'hello');
+
+    capturedCallbacks!.onDisconnect!('connection lost');
+
+    const interrupted = events.find((e) => e.type === 'connection-interrupted');
+    expect(interrupted).toBeDefined();
+    if (interrupted?.type === 'connection-interrupted') {
+      expect(interrupted.sessionId).toBe('test-session-id');
+      expect(interrupted.messageId).toMatch(/^msg-/);
+    }
+
+    resolvePrompt();
+    await sendPromise;
+  });
+
+  it('onDisconnect 后状态变为 disconnected', async () => {
+    let capturedCallbacks: AcpClientCallbacks | null = null;
+    const discFactory: AcpClientFactory = (_url, callbacks) => {
+      capturedCallbacks = callbacks;
+      return mockClient;
+    };
+    const discAdapter = new WebAcpAdapter(discFactory);
+    await discAdapter.connect({ endpoint: 'http://127.0.0.1:3000', workspace: '/tmp' });
+
+    capturedCallbacks!.onDisconnect!('connection lost');
+
+    expect(discAdapter.getConnectionState().status).toBe('disconnected');
+  });
+
+  it('onDisconnect 无活跃消息时不发射 connection-interrupted', async () => {
+    const events: AdapterEvent[] = [];
+    let capturedCallbacks: AcpClientCallbacks | null = null;
+    const discFactory: AcpClientFactory = (_url, callbacks) => {
+      capturedCallbacks = callbacks;
+      return mockClient;
+    };
+    const discAdapter = new WebAcpAdapter(discFactory);
+    discAdapter.subscribe((e) => events.push(e));
+    await discAdapter.connect({ endpoint: 'http://127.0.0.1:3000', workspace: '/tmp' });
+
+    capturedCallbacks!.onDisconnect!('connection lost');
+
+    const interrupted = events.filter((e) => e.type === 'connection-interrupted');
+    expect(interrupted.length).toBe(0);
+  });
+
+  it('connect 传递 onDisconnect 回调给工厂', async () => {
+    await adapter.connect({
+      endpoint: 'http://127.0.0.1:3000',
+      workspace: '/tmp',
+    });
+    expect(mockFactory).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ onDisconnect: expect.any(Function) }),
+    );
+  });
+
+  it('reconnect 使用已存储的配置重新连接', async () => {
+    let capturedCallbacks: AcpClientCallbacks | null = null;
+    const discFactory: AcpClientFactory = (_url, callbacks) => {
+      capturedCallbacks = callbacks;
+      return mockClient;
+    };
+    const discAdapter = new WebAcpAdapter(discFactory);
+    await discAdapter.connect({
+      endpoint: 'http://127.0.0.1:3000',
+      secretKey: 'k',
+      workspace: '/tmp',
+    });
+
+    capturedCallbacks!.onDisconnect!('connection lost');
+    expect(discAdapter.getConnectionState().status).toBe('disconnected');
+
+    await discAdapter.reconnect();
+    expect(discAdapter.getConnectionState().status).toBe('connected');
+  });
+
+  it('reconnect 未连接过时抛出错误', async () => {
+    await expect(adapter.reconnect()).rejects.toThrow('无配置，无法重连');
+  });
 });

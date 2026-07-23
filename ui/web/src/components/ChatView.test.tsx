@@ -105,4 +105,72 @@ describe('ChatView', () => {
     });
     expect(screen.getByText('重试')).toBeInTheDocument();
   });
+
+  it('断线时显示恢复 UI 并保留已接收内容', async () => {
+    const { adapter, emit } = createFakeAdapter();
+    render(<ChatView adapter={adapter} workspace={{ path: '/tmp/proj' }} />);
+
+    const input = await screen.findByPlaceholderText(/Enter 发送/);
+    fireEvent.change(input, { target: { value: 'hello' } });
+    await act(async () => {
+      fireEvent.click(screen.getByText('发送'));
+    });
+
+    act(() => {
+      emit({
+        type: 'message-chunk',
+        sessionId: 'sess-1',
+        messageId: 'msg-assistant',
+        delta: 'partial',
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('partial')).toBeInTheDocument();
+    });
+
+    act(() => {
+      emit({
+        type: 'connection-interrupted',
+        sessionId: 'sess-1',
+        messageId: 'msg-assistant',
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText(/连接已中断/)).toBeInTheDocument();
+      expect(screen.getByText('重连')).toBeInTheDocument();
+      expect(screen.getByText('重新发送')).toBeInTheDocument();
+    });
+
+    expect(screen.getByText('partial')).toBeInTheDocument();
+    expect(document.querySelector('.rui-streaming-cursor')).toBeNull();
+  });
+
+  it('断线恢复 UI 中重新发送调用 adapter.sendMessage', async () => {
+    const { adapter, emit } = createFakeAdapter();
+    render(<ChatView adapter={adapter} workspace={{ path: '/tmp/proj' }} />);
+
+    const input = await screen.findByPlaceholderText(/Enter 发送/);
+    fireEvent.change(input, { target: { value: '重新发我' } });
+    await act(async () => {
+      fireEvent.click(screen.getByText('发送'));
+    });
+
+    act(() => {
+      emit({
+        type: 'connection-interrupted',
+        sessionId: 'sess-1',
+        messageId: 'msg-assistant',
+      });
+    });
+
+    const resendBtn = await screen.findByText('重新发送');
+    await act(async () => {
+      fireEvent.click(resendBtn);
+    });
+
+    expect(adapter.sendMessage).toHaveBeenCalledTimes(2);
+    expect(adapter.sendMessage).toHaveBeenLastCalledWith('sess-1', '重新发我');
+  });
 });

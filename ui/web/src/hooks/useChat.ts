@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import type { AcpAdapter, Message, SessionId, SessionStatus } from '../product/types';
-import { accumulateChunk, finalizeMessage } from '../chat/messageAccumulator';
+import { accumulateChunk, finalizeMessage, markInterrupted } from '../chat/messageAccumulator';
 
 function generateId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -11,6 +11,8 @@ export interface UseChatResult {
   status: SessionStatus;
   sendMessage: (content: string) => Promise<void>;
   cancel: () => Promise<void>;
+  reconnect: () => Promise<void>;
+  resendLastMessage: () => Promise<void>;
 }
 
 export function useChat(
@@ -34,6 +36,9 @@ export function useChat(
         setStatus('cancelled');
       } else if (event.type === 'session-error') {
         setStatus('error');
+      } else if (event.type === 'connection-interrupted') {
+        setMessages((prev) => markInterrupted(prev, event.messageId));
+        setStatus('interrupted');
       }
     });
   }, [adapter, sessionId]);
@@ -60,5 +65,19 @@ export function useChat(
     await adapter.cancelSession(sessionId);
   }, [adapter, sessionId]);
 
-  return { messages, status, sendMessage, cancel };
+  const reconnect = useCallback(async () => {
+    if (!adapter?.reconnect) return;
+    await adapter.reconnect();
+    setStatus('idle');
+  }, [adapter]);
+
+  const resendLastMessage = useCallback(async () => {
+    if (!adapter || !sessionId) return;
+    const lastUser = [...messages].reverse().find((m) => m.role === 'user');
+    if (!lastUser || lastUser.role !== 'user') return;
+    setStatus('streaming');
+    await adapter.sendMessage(sessionId, lastUser.content);
+  }, [adapter, sessionId, messages]);
+
+  return { messages, status, sendMessage, cancel, reconnect, resendLastMessage };
 }
