@@ -1,17 +1,9 @@
 import { useEffect, useRef } from 'react';
-import type { Message, AssistantMessage } from '../product/types';
-
-const blinkingCursorStyle = `
-@keyframes rui-blink {
-  0%, 50% { opacity: 1; }
-  51%, 100% { opacity: 0; }
-}
-.rui-streaming-cursor {
-  display: inline-block;
-  margin-left: 2px;
-  animation: rui-blink 1s steps(1) infinite;
-}
-`;
+import type { Message, ToolMessage } from '../product/types';
+import { AssistantMessageView } from './messages/AssistantMessageView';
+import { UserMessageView } from './messages/UserMessageView';
+import { SystemMessageView } from './messages/SystemMessageView';
+import { ErrorMessageView } from './messages/ErrorMessageView';
 
 export function MessageList({ messages }: { messages: Message[] }) {
   const bottomRef = useRef<HTMLDivElement | null>(null);
@@ -34,7 +26,6 @@ export function MessageList({ messages }: { messages: Message[] }) {
         gap: '12px',
       }}
     >
-      <style>{blinkingCursorStyle}</style>
       {messages.map((m) => (
         <MessageBubble key={m.id} message={m} />
       ))}
@@ -44,67 +35,23 @@ export function MessageList({ messages }: { messages: Message[] }) {
 }
 
 function MessageBubble({ message }: { message: Message }) {
-  if (message.role === 'user') {
-    return (
-      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-        <div style={userBubbleStyle}>{message.content}</div>
-      </div>
-    );
+  switch (message.role) {
+    case 'user':
+      return <UserMessageView message={message} />;
+    case 'assistant':
+      return <AssistantMessageView message={message} />;
+    case 'system':
+      return <SystemMessageView message={message} />;
+    case 'error':
+      return <ErrorMessageView message={message} />;
+    case 'tool':
+      return <ToolMessagePlaceholder message={message} />;
+    default:
+      return null;
   }
-  if (message.role === 'assistant') {
-    return <AssistantBubble message={message} />;
-  }
-  if (message.role === 'tool') {
-    return (
-      <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
-        <div style={systemBubbleStyle}>{message.toolInvocation.toolName}</div>
-      </div>
-    );
-  }
-  const content = 'content' in message ? message.content : '';
-  return (
-    <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
-      <div style={systemBubbleStyle}>{content}</div>
-    </div>
-  );
 }
 
-function AssistantBubble({ message }: { message: AssistantMessage }) {
-  return (
-    <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
-      <div style={assistantBubbleStyle}>
-        {message.content}
-        {message.isStreaming && <span className="rui-streaming-cursor">▋</span>}
-      </div>
-    </div>
-  );
-}
-
-const userBubbleStyle: React.CSSProperties = {
-  maxWidth: '70%',
-  padding: '8px 12px',
-  borderRadius: '12px',
-  background: '#3182ce',
-  color: '#fff',
-  fontSize: 14,
-  lineHeight: 1.5,
-  wordBreak: 'break-word',
-  whiteSpace: 'pre-wrap',
-};
-
-const assistantBubbleStyle: React.CSSProperties = {
-  maxWidth: '70%',
-  padding: '8px 12px',
-  borderRadius: '12px',
-  background: '#f1f3f5',
-  color: '#333',
-  fontSize: 14,
-  lineHeight: 1.5,
-  wordBreak: 'break-word',
-  whiteSpace: 'pre-wrap',
-};
-
-const systemBubbleStyle: React.CSSProperties = {
+const toolBubbleStyle: React.CSSProperties = {
   maxWidth: '70%',
   padding: '8px 12px',
   borderRadius: '12px',
@@ -115,3 +62,11 @@ const systemBubbleStyle: React.CSSProperties = {
   wordBreak: 'break-word',
   whiteSpace: 'pre-wrap',
 };
+
+function ToolMessagePlaceholder({ message }: { message: ToolMessage }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
+      <div style={toolBubbleStyle}>{message.toolInvocation.toolName}</div>
+    </div>
+  );
+}
