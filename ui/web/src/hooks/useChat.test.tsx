@@ -286,4 +286,152 @@ describe('useChat', () => {
 
     expect(adapter.sendMessage).not.toHaveBeenCalled();
   });
+
+  it('tool-call-started 添加 ToolMessage 到消息列表', async () => {
+    const { adapter, emit } = createFakeAdapter();
+    const { result } = renderHook(() => useChat(adapter, 'sess-1'));
+
+    act(() => {
+      emit({
+        type: 'tool-call-started',
+        sessionId: 'sess-1',
+        invocation: {
+          id: 'tool-1',
+          toolName: 'read_file',
+          argumentsSummary: '{"path":"/tmp"}',
+          status: 'in-progress',
+          result: null,
+        },
+      });
+    });
+
+    expect(result.current.messages.length).toBe(1);
+    const tool = result.current.messages[0];
+    expect(tool.role).toBe('tool');
+    if (tool.role === 'tool') {
+      expect(tool.toolInvocation.id).toBe('tool-1');
+      expect(tool.toolInvocation.toolName).toBe('read_file');
+      expect(tool.toolInvocation.status).toBe('in-progress');
+      expect(tool.toolInvocation.result).toBeNull();
+    }
+  });
+
+  it('tool-call-updated 更新工具状态', async () => {
+    const { adapter, emit } = createFakeAdapter();
+    const { result } = renderHook(() => useChat(adapter, 'sess-1'));
+
+    act(() => {
+      emit({
+        type: 'tool-call-started',
+        sessionId: 'sess-1',
+        invocation: {
+          id: 'tool-1',
+          toolName: 'read_file',
+          argumentsSummary: '',
+          status: 'in-progress',
+          result: null,
+        },
+      });
+    });
+    act(() => {
+      emit({
+        type: 'tool-call-updated',
+        sessionId: 'sess-1',
+        invocationId: 'tool-1',
+        status: 'failed',
+      });
+    });
+
+    const tool = result.current.messages[0];
+    if (tool.role === 'tool') {
+      expect(tool.toolInvocation.status).toBe('failed');
+    }
+  });
+
+  it('tool-result 设置工具结果并标记完成', async () => {
+    const { adapter, emit } = createFakeAdapter();
+    const { result } = renderHook(() => useChat(adapter, 'sess-1'));
+
+    act(() => {
+      emit({
+        type: 'tool-call-started',
+        sessionId: 'sess-1',
+        invocation: {
+          id: 'tool-1',
+          toolName: 'read_file',
+          argumentsSummary: '',
+          status: 'in-progress',
+          result: null,
+        },
+      });
+    });
+    act(() => {
+      emit({
+        type: 'tool-result',
+        sessionId: 'sess-1',
+        invocationId: 'tool-1',
+        result: { content: '文件内容', isError: false },
+      });
+    });
+
+    const tool = result.current.messages[0];
+    if (tool.role === 'tool') {
+      expect(tool.toolInvocation.status).toBe('completed');
+      expect(tool.toolInvocation.result).toEqual({ content: '文件内容', isError: false });
+    }
+  });
+
+  it('tool-result isError 时状态变为 failed', async () => {
+    const { adapter, emit } = createFakeAdapter();
+    const { result } = renderHook(() => useChat(adapter, 'sess-1'));
+
+    act(() => {
+      emit({
+        type: 'tool-call-started',
+        sessionId: 'sess-1',
+        invocation: {
+          id: 'tool-1',
+          toolName: 'read_file',
+          argumentsSummary: '',
+          status: 'in-progress',
+          result: null,
+        },
+      });
+    });
+    act(() => {
+      emit({
+        type: 'tool-result',
+        sessionId: 'sess-1',
+        invocationId: 'tool-1',
+        result: { content: '失败', isError: true },
+      });
+    });
+
+    const tool = result.current.messages[0];
+    if (tool.role === 'tool') {
+      expect(tool.toolInvocation.status).toBe('failed');
+      expect(tool.toolInvocation.result?.isError).toBe(true);
+    }
+  });
+
+  it('tool 事件不影响其它 session 的消息', async () => {
+    const { adapter, emit } = createFakeAdapter();
+    const { result } = renderHook(() => useChat(adapter, 'sess-1'));
+
+    act(() => {
+      emit({
+        type: 'tool-call-started',
+        sessionId: 'other-session',
+        invocation: {
+          id: 'tool-1',
+          toolName: 'read_file',
+          argumentsSummary: '',
+          status: 'in-progress',
+          result: null,
+        },
+      });
+    });
+
+    expect(result.current.messages.length).toBe(0);
+  });
 });

@@ -70,6 +70,11 @@ export interface AcpSessionNotification {
       | 'usage_update';
     content?: { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string };
     messageId?: string;
+    toolCallId?: string;
+    title?: string;
+    status?: string;
+    rawInput?: unknown;
+    rawOutput?: unknown;
   };
 }
 
@@ -252,18 +257,72 @@ export class WebAcpAdapter implements AcpAdapter {
     });
   }
 
-  /** 将 agent_message_chunk 通知转换为 message-chunk 适配器事件 */
+  /** 将 ACP session/update 通知转换为 RUI 适配器事件 */
   private handleSessionUpdate(notification: AcpSessionNotification): void {
-    const { update } = notification;
-    if (update.sessionUpdate !== 'agent_message_chunk') return;
-    if (!update.content || update.content.type !== 'text') return;
-    if (!this.currentMessageId) return;
-    this.emit({
-      type: 'message-chunk',
-      sessionId: notification.sessionId,
-      messageId: this.currentMessageId,
-      delta: update.content.text,
-    });
+    const { update, sessionId } = notification;
+    if (update.sessionUpdate === 'agent_message_chunk') {
+      if (!update.content || update.content.type !== 'text') return;
+      if (!this.currentMessageId) return;
+      this.emit({
+        type: 'message-chunk',
+        sessionId,
+        messageId: this.currentMessageId,
+        delta: update.content.text,
+      });
+      return;
+    }
+    if (update.sessionUpdate === 'tool_call') {
+      const toolCallId = update.toolCallId || generateId('tool');
+      const toolName = update.title || '未知工具';
+      const argumentsSummary = this.summarizeToolArguments(update.rawInput);
+      this.emit({
+        type: 'tool-call-started',
+        sessionId,
+        invocation: {
+          id: toolCallId,
+          toolName,
+          argumentsSummary,
+          status: 'in-progress',
+          result: null,
+        },
+      });
+      return;
+    }
+    if (update.sessionUpdate === 'tool_call_update') {
+      const toolCallId = update.toolCallId || '';
+      if (!toolCallId) return;
+      const acpStatus = update.status || '';
+      if (acpStatus === 'completed') {
+        const resultContent = this.summarizeToolResult(update.rawOutput);
+        this.emit({ type: 'tool-call-updated', sessionId, invocationId: toolCallId, status: 'completed' });
+        this.emit({ type: 'tool-result', sessionId, invocationId: toolCallId, result: { content: resultContent, isError: false } });
+      } else if (acpStatus === 'failed') {
+        const errorContent = this.summarizeToolResult(update.rawOutput) || update.title || '工具调用失败';
+        this.emit({ type: 'tool-call-updated', sessionId, invocationId: toolCallId, status: 'failed' });
+        this.emit({ type: 'tool-result', sessionId, invocationId: toolCallId, result: { content: errorContent, isError: true } });
+      } else {
+        this.emit({ type: 'tool-call-updated', sessionId, invocationId: toolCallId, status: 'in-progress' });
+      }
+      return;
+    }
+  }
+
+  /** 生成工具参数摘要 */
+  private summarizeToolArguments(rawInput: unknown): string {
+    if (typeof rawInput === 'string') return rawInput.slice(0, 200);
+    if (rawInput && typeof rawInput === 'object') {
+      try { return JSON.stringify(rawInput).slice(0, 200); } catch { return ''; }
+    }
+    return '';
+  }
+
+  /** 生成工具结果摘要 */
+  private summarizeToolResult(rawOutput: unknown): string {
+    if (typeof rawOutput === 'string') return rawOutput.slice(0, 500);
+    if (rawOutput && typeof rawOutput === 'object') {
+      try { return JSON.stringify(rawOutput).slice(0, 500); } catch { return ''; }
+    }
+    return '';
   }
 
   /** 处理连接断开：发射 connection-interrupted 事件并切换状态 */

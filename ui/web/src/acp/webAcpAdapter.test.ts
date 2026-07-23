@@ -391,4 +391,282 @@ describe('WebAcpAdapter', () => {
   it('reconnect 未连接过时抛出错误', async () => {
     await expect(adapter.reconnect()).rejects.toThrow('无配置，无法重连');
   });
+
+  function createStreamingAdapter() {
+    const events: AdapterEvent[] = [];
+    let capturedCallbacks: AcpClientCallbacks | null = null;
+    const streamingFactory: AcpClientFactory = (_url, callbacks) => {
+      capturedCallbacks = callbacks;
+      return mockClient;
+    };
+    const streamAdapter = new WebAcpAdapter(streamingFactory);
+    streamAdapter.subscribe((e) => events.push(e));
+    return { streamAdapter, events, getCallbacks: () => capturedCallbacks };
+  }
+
+  it('tool_call 通知发射 tool-call-started 事件', async () => {
+    const { streamAdapter, events, getCallbacks } = createStreamingAdapter();
+    await streamAdapter.connect({ endpoint: 'http://127.0.0.1:3000', workspace: '/tmp' });
+    await streamAdapter.createSession({ path: '/tmp' });
+
+    getCallbacks()!.onSessionUpdate!({
+      sessionId: 'test-session-id',
+      update: {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'tool-1',
+        title: 'read_file',
+        rawInput: { path: '/tmp/foo.txt' },
+      },
+    });
+
+    const started = events.find((e) => e.type === 'tool-call-started');
+    expect(started).toBeDefined();
+    if (started?.type === 'tool-call-started') {
+      expect(started.sessionId).toBe('test-session-id');
+      expect(started.invocation.id).toBe('tool-1');
+      expect(started.invocation.toolName).toBe('read_file');
+      expect(started.invocation.status).toBe('in-progress');
+      expect(started.invocation.result).toBeNull();
+      expect(started.invocation.argumentsSummary).toBe('{"path":"/tmp/foo.txt"}');
+    }
+  });
+
+  it('tool_call 缺省 toolCallId 时自动生成', async () => {
+    const { streamAdapter, events, getCallbacks } = createStreamingAdapter();
+    await streamAdapter.connect({ endpoint: 'http://127.0.0.1:3000', workspace: '/tmp' });
+    await streamAdapter.createSession({ path: '/tmp' });
+
+    getCallbacks()!.onSessionUpdate!({
+      sessionId: 'test-session-id',
+      update: {
+        sessionUpdate: 'tool_call',
+        title: 'search',
+      },
+    });
+
+    const started = events.find((e) => e.type === 'tool-call-started');
+    expect(started).toBeDefined();
+    if (started?.type === 'tool-call-started') {
+      expect(started.invocation.id).toMatch(/^tool-/);
+      expect(started.invocation.toolName).toBe('search');
+    }
+  });
+
+  it('tool_call 缺省 title 时使用默认工具名', async () => {
+    const { streamAdapter, events, getCallbacks } = createStreamingAdapter();
+    await streamAdapter.connect({ endpoint: 'http://127.0.0.1:3000', workspace: '/tmp' });
+    await streamAdapter.createSession({ path: '/tmp' });
+
+    getCallbacks()!.onSessionUpdate!({
+      sessionId: 'test-session-id',
+      update: {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'tool-1',
+      },
+    });
+
+    const started = events.find((e) => e.type === 'tool-call-started');
+    expect(started).toBeDefined();
+    if (started?.type === 'tool-call-started') {
+      expect(started.invocation.toolName).toBe('未知工具');
+    }
+  });
+
+  it('tool_call_update completed 发射 tool-result 事件', async () => {
+    const { streamAdapter, events, getCallbacks } = createStreamingAdapter();
+    await streamAdapter.connect({ endpoint: 'http://127.0.0.1:3000', workspace: '/tmp' });
+    await streamAdapter.createSession({ path: '/tmp' });
+
+    getCallbacks()!.onSessionUpdate!({
+      sessionId: 'test-session-id',
+      update: { sessionUpdate: 'tool_call', toolCallId: 'tool-1', title: 'read_file' },
+    });
+    getCallbacks()!.onSessionUpdate!({
+      sessionId: 'test-session-id',
+      update: {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'tool-1',
+        status: 'completed',
+        rawOutput: '文件内容',
+      },
+    });
+
+    const updated = events.filter((e) => e.type === 'tool-call-updated');
+    expect(updated.length).toBe(1);
+    if (updated[0].type === 'tool-call-updated') {
+      expect(updated[0].invocationId).toBe('tool-1');
+      expect(updated[0].status).toBe('completed');
+    }
+    const result = events.find((e) => e.type === 'tool-result');
+    expect(result).toBeDefined();
+    if (result?.type === 'tool-result') {
+      expect(result.invocationId).toBe('tool-1');
+      expect(result.result.content).toBe('文件内容');
+      expect(result.result.isError).toBe(false);
+    }
+  });
+
+  it('tool_call_update failed 发射 tool-result isError=true', async () => {
+    const { streamAdapter, events, getCallbacks } = createStreamingAdapter();
+    await streamAdapter.connect({ endpoint: 'http://127.0.0.1:3000', workspace: '/tmp' });
+    await streamAdapter.createSession({ path: '/tmp' });
+
+    getCallbacks()!.onSessionUpdate!({
+      sessionId: 'test-session-id',
+      update: { sessionUpdate: 'tool_call', toolCallId: 'tool-1', title: 'read_file' },
+    });
+    getCallbacks()!.onSessionUpdate!({
+      sessionId: 'test-session-id',
+      update: {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'tool-1',
+        status: 'failed',
+        rawOutput: { error: '文件不存在' },
+        title: 'read_file',
+      },
+    });
+
+    const updated = events.filter((e) => e.type === 'tool-call-updated');
+    expect(updated.length).toBe(1);
+    if (updated[0].type === 'tool-call-updated') {
+      expect(updated[0].status).toBe('failed');
+    }
+    const result = events.find((e) => e.type === 'tool-result');
+    expect(result).toBeDefined();
+    if (result?.type === 'tool-result') {
+      expect(result.result.isError).toBe(true);
+      expect(result.result.content).toContain('文件不存在');
+    }
+  });
+
+  it('tool_call_update failed 无 rawOutput 时使用 title 作为错误内容', async () => {
+    const { streamAdapter, events, getCallbacks } = createStreamingAdapter();
+    await streamAdapter.connect({ endpoint: 'http://127.0.0.1:3000', workspace: '/tmp' });
+    await streamAdapter.createSession({ path: '/tmp' });
+
+    getCallbacks()!.onSessionUpdate!({
+      sessionId: 'test-session-id',
+      update: { sessionUpdate: 'tool_call', toolCallId: 'tool-1', title: 'read_file' },
+    });
+    getCallbacks()!.onSessionUpdate!({
+      sessionId: 'test-session-id',
+      update: {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'tool-1',
+        status: 'failed',
+        title: '权限被拒绝',
+      },
+    });
+
+    const result = events.find((e) => e.type === 'tool-result');
+    expect(result).toBeDefined();
+    if (result?.type === 'tool-result') {
+      expect(result.result.content).toBe('权限被拒绝');
+      expect(result.result.isError).toBe(true);
+    }
+  });
+
+  it('tool_call_update in_progress 仅发射 tool-call-updated 事件', async () => {
+    const { streamAdapter, events, getCallbacks } = createStreamingAdapter();
+    await streamAdapter.connect({ endpoint: 'http://127.0.0.1:3000', workspace: '/tmp' });
+    await streamAdapter.createSession({ path: '/tmp' });
+
+    getCallbacks()!.onSessionUpdate!({
+      sessionId: 'test-session-id',
+      update: { sessionUpdate: 'tool_call', toolCallId: 'tool-1', title: 'read_file' },
+    });
+    getCallbacks()!.onSessionUpdate!({
+      sessionId: 'test-session-id',
+      update: {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'tool-1',
+        status: 'in_progress',
+      },
+    });
+
+    const updated = events.filter((e) => e.type === 'tool-call-updated');
+    expect(updated.length).toBe(1);
+    if (updated[0].type === 'tool-call-updated') {
+      expect(updated[0].status).toBe('in-progress');
+    }
+    const results = events.filter((e) => e.type === 'tool-result');
+    expect(results.length).toBe(0);
+  });
+
+  it('tool_call_update 缺省 toolCallId 时被忽略', async () => {
+    const { streamAdapter, events, getCallbacks } = createStreamingAdapter();
+    await streamAdapter.connect({ endpoint: 'http://127.0.0.1:3000', workspace: '/tmp' });
+    await streamAdapter.createSession({ path: '/tmp' });
+
+    getCallbacks()!.onSessionUpdate!({
+      sessionId: 'test-session-id',
+      update: {
+        sessionUpdate: 'tool_call_update',
+        status: 'completed',
+        rawOutput: '结果',
+      },
+    });
+
+    const updated = events.filter((e) => e.type === 'tool-call-updated');
+    expect(updated.length).toBe(0);
+    const results = events.filter((e) => e.type === 'tool-result');
+    expect(results.length).toBe(0);
+  });
+
+  it('summarizeToolArguments 处理字符串和对象', async () => {
+    const { streamAdapter, events, getCallbacks } = createStreamingAdapter();
+    await streamAdapter.connect({ endpoint: 'http://127.0.0.1:3000', workspace: '/tmp' });
+    await streamAdapter.createSession({ path: '/tmp' });
+
+    getCallbacks()!.onSessionUpdate!({
+      sessionId: 'test-session-id',
+      update: {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'tool-str',
+        title: 't1',
+        rawInput: 'plain string args',
+      },
+    });
+    getCallbacks()!.onSessionUpdate!({
+      sessionId: 'test-session-id',
+      update: {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'tool-obj',
+        title: 't2',
+        rawInput: { foo: 'bar', n: 42 },
+      },
+    });
+
+    const started = events.filter((e) => e.type === 'tool-call-started');
+    expect(started.length).toBe(2);
+    if (started[0].type === 'tool-call-started') {
+      expect(started[0].invocation.argumentsSummary).toBe('plain string args');
+    }
+    if (started[1].type === 'tool-call-started') {
+      expect(started[1].invocation.argumentsSummary).toBe('{"foo":"bar","n":42}');
+    }
+  });
+
+  it('summarizeToolArguments 截断超长字符串', async () => {
+    const { streamAdapter, events, getCallbacks } = createStreamingAdapter();
+    await streamAdapter.connect({ endpoint: 'http://127.0.0.1:3000', workspace: '/tmp' });
+    await streamAdapter.createSession({ path: '/tmp' });
+
+    const longString = 'a'.repeat(300);
+    getCallbacks()!.onSessionUpdate!({
+      sessionId: 'test-session-id',
+      update: {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'tool-long',
+        title: 't1',
+        rawInput: longString,
+      },
+    });
+
+    const started = events.find((e) => e.type === 'tool-call-started');
+    expect(started).toBeDefined();
+    if (started?.type === 'tool-call-started') {
+      expect(started.invocation.argumentsSummary.length).toBe(200);
+    }
+  });
 });
