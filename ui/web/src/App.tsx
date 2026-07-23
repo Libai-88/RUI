@@ -1,7 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import type { AcpConnectionConfig } from './product/types';
 import { loadConnectionConfig, saveConnectionConfig } from './connection/connectionConfig';
 import { ConnectionWizard } from './components/ConnectionWizard';
+import { ChatView } from './components/ChatView';
+import { WebAcpAdapter } from './acp/webAcpAdapter';
+import { createGooseClientFactory } from './acp/gooseClientFactory';
 
 /**
  * RUI Web 应用根组件
@@ -31,6 +34,15 @@ export function App() {
     return <ConnectionWizard onConnected={handleConnected} />;
   }
 
+  return <ConnectedApp config={config} />;
+}
+
+function ConnectedApp({ config }: { config: AcpConnectionConfig }) {
+  const adapter = useMemo(
+    () => new WebAcpAdapter(createGooseClientFactory()),
+    [],
+  );
+
   return (
     <div style={{ display: 'flex', height: '100vh', flexDirection: 'column' }}>
       <header style={{ padding: '8px 16px', borderBottom: '1px solid #e5e7eb' }}>
@@ -39,9 +51,8 @@ export function App() {
           {config.endpoint}
         </span>
       </header>
-      <main style={{ flex: 1, padding: 16, color: '#666' }}>
-        <p>已连接到 ACP 服务。工作台正在准备中…</p>
-        <p style={{ fontSize: 14 }}>工作目录：{config.workspace || '未设置'}</p>
+      <main style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <ChatView adapter={adapter} workspace={{ path: config.workspace }} />
       </main>
     </div>
   );

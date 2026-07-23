@@ -25,20 +25,6 @@ function normalizeBaseUrl(endpoint: string): string {
   return url;
 }
 
-/** 构建 ACP WebSocket URL */
-function buildAcpWsUrl(baseUrl: string, secretKey?: string): string {
-  const acpUrl = new URL(`${baseUrl}/acp`);
-  if (acpUrl.protocol === 'http:') {
-    acpUrl.protocol = 'ws:';
-  } else if (acpUrl.protocol === 'https:') {
-    acpUrl.protocol = 'wss:';
-  }
-  if (secretKey) {
-    acpUrl.searchParams.set('token', secretKey);
-  }
-  return acpUrl.toString();
-}
-
 /**
  * ACP 客户端接口
  *
@@ -70,8 +56,33 @@ interface AcpSessionListItem {
   };
 }
 
+/** ACP session/update notification (only the fields RUI needs) */
+export interface AcpSessionNotification {
+  sessionId: string;
+  update: {
+    sessionUpdate:
+      | 'agent_message_chunk'
+      | 'agent_thought_chunk'
+      | 'user_message_chunk'
+      | 'tool_call'
+      | 'tool_call_update'
+      | 'session_info_update'
+      | 'usage_update';
+    content?: { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string };
+    messageId?: string;
+  };
+}
+
+/** Callbacks the ACP client invokes for inbound notifications */
+export interface AcpClientCallbacks {
+  onSessionUpdate?(notification: AcpSessionNotification): void;
+}
+
 /** 客户端工厂函数类型 */
-export type AcpClientFactory = (wsUrl: string) => AcpClient;
+export type AcpClientFactory = (
+  baseUrl: string,
+  callbacks: AcpClientCallbacks,
+) => AcpClient;
 
 /**
  * Web 端 ACP 适配器
@@ -84,6 +95,7 @@ export class WebAcpAdapter implements AcpAdapter {
   private listeners: Set<(event: AdapterEvent) => void> = new Set();
   private stateManager = new ConnectionStateManager();
   private config: AcpConnectionConfig | null = null;
+  private currentMessageId: string | null = null;
 
   constructor(private clientFactory: AcpClientFactory) {}
 
@@ -95,12 +107,11 @@ export class WebAcpAdapter implements AcpAdapter {
   async connect(config: AcpConnectionConfig): Promise<void> {
     this.config = config;
     this.stateManager.tryTransition(states.connecting());
-
     const baseUrl = normalizeBaseUrl(config.endpoint);
-    const wsUrl = buildAcpWsUrl(baseUrl, config.secretKey);
-
     try {
-      this.client = this.clientFactory(wsUrl);
+      this.client = this.clientFactory(baseUrl, {
+        onSessionUpdate: (notification) => this.handleSessionUpdate(notification),
+      });
       this.stateManager.tryTransition(states.connected());
       this.emit({ type: 'connection-state-changed', state: this.stateManager.getState() });
     } catch (err) {
@@ -179,19 +190,19 @@ export class WebAcpAdapter implements AcpAdapter {
 
   async sendMessage(sessionId: SessionId, content: string): Promise<MessageId> {
     if (!this.client) throw new Error('ACP 未连接');
-
     const messageId = generateId('msg');
+    this.currentMessageId = messageId;
     this.stateManager.tryTransition(states.processing());
-
-    await this.client.sessionPrompt({
-      sessionId,
-      prompt: content,
-    });
-
-    // 暂时直接标记完成，后续切片实现流式
-    this.emit({ type: 'message-complete', sessionId, messageId });
-    this.stateManager.tryTransition(states.connected());
-
+    try {
+      await this.client.sessionPrompt({
+        sessionId,
+        prompt: content,
+      });
+      this.emit({ type: 'message-complete', sessionId, messageId });
+    } finally {
+      this.currentMessageId = null;
+      this.stateManager.tryTransition(states.connected());
+    }
     return messageId;
   }
 
@@ -228,6 +239,20 @@ export class WebAcpAdapter implements AcpAdapter {
       sessionId,
       requestId,
       allowed,
+    });
+  }
+
+  /** 将 agent_message_chunk 通知转换为 message-chunk 适配器事件 */
+  private handleSessionUpdate(notification: AcpSessionNotification): void {
+    const { update } = notification;
+    if (update.sessionUpdate !== 'agent_message_chunk') return;
+    if (!update.content || update.content.type !== 'text') return;
+    if (!this.currentMessageId) return;
+    this.emit({
+      type: 'message-chunk',
+      sessionId: notification.sessionId,
+      messageId: this.currentMessageId,
+      delta: update.content.text,
     });
   }
 

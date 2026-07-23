@@ -1,5 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { WebAcpAdapter, type AcpClient, type AcpClientFactory } from './webAcpAdapter';
+import {
+  WebAcpAdapter,
+  type AcpClient,
+  type AcpClientFactory,
+  type AcpClientCallbacks,
+} from './webAcpAdapter';
 import type { AdapterEvent } from '../product/types';
 
 /** 创建 mock 客户端 */
@@ -21,7 +26,9 @@ describe('WebAcpAdapter', () => {
 
   beforeEach(() => {
     mockClient = createMockClient();
-    mockFactory = vi.fn(() => mockClient);
+    mockFactory = vi.fn(
+      (_url: string, _callbacks: AcpClientCallbacks) => mockClient,
+    );
     adapter = new WebAcpAdapter(mockFactory);
   });
 
@@ -38,21 +45,27 @@ describe('WebAcpAdapter', () => {
     expect(adapter.getConnectionState().status).toBe('connected');
   });
 
-  it('connect 调用客户端工厂', async () => {
+  it('connect 调用客户端工厂并传递规范化 HTTP 基础 URL', async () => {
     await adapter.connect({
       endpoint: 'http://127.0.0.1:3000',
       workspace: '/tmp',
     });
-    expect(mockFactory).toHaveBeenCalledWith(expect.stringContaining('ws://127.0.0.1:3000/acp'));
+    expect(mockFactory).toHaveBeenCalledWith(
+      expect.stringContaining('http://127.0.0.1:3000'),
+      expect.anything(),
+    );
   });
 
-  it('connect 构建 ws URL 包含 token', async () => {
+  it('connect 传递回调对象给工厂', async () => {
     await adapter.connect({
       endpoint: 'http://127.0.0.1:3000',
       secretKey: 'my-secret',
       workspace: '/tmp',
     });
-    expect(mockFactory).toHaveBeenCalledWith(expect.stringContaining('token=my-secret'));
+    expect(mockFactory).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ onSessionUpdate: expect.any(Function) }),
+    );
   });
 
   it('disconnect 后状态回到 disconnected', async () => {
@@ -201,5 +214,84 @@ describe('WebAcpAdapter', () => {
     ).rejects.toThrow('连接被拒绝');
 
     expect(failAdapter.getConnectionState().status).toBe('service-unavailable');
+  });
+
+  it('sendMessage 发射 message-chunk 事件当收到 agent_message_chunk 通知', async () => {
+    const events: AdapterEvent[] = [];
+    let capturedCallbacks: AcpClientCallbacks | null = null;
+    const streamingFactory: AcpClientFactory = (_url, callbacks) => {
+      capturedCallbacks = callbacks;
+      return mockClient;
+    };
+    const streamAdapter = new WebAcpAdapter(streamingFactory);
+    streamAdapter.subscribe((e) => events.push(e));
+    await streamAdapter.connect({ endpoint: 'http://127.0.0.1:3000', workspace: '/tmp' });
+    await streamAdapter.createSession({ path: '/tmp' });
+
+    let resolvePrompt!: () => void;
+    mockClient.sessionPrompt = vi.fn(
+      () => new Promise<void>((r) => { resolvePrompt = r; }),
+    );
+
+    const sendPromise = streamAdapter.sendMessage('test-session-id', '你好');
+
+    capturedCallbacks!.onSessionUpdate!({
+      sessionId: 'test-session-id',
+      update: {
+        sessionUpdate: 'agent_message_chunk',
+        content: { type: 'text', text: '你好' },
+      },
+    });
+    capturedCallbacks!.onSessionUpdate!({
+      sessionId: 'test-session-id',
+      update: {
+        sessionUpdate: 'agent_message_chunk',
+        content: { type: 'text', text: '！' },
+      },
+    });
+
+    resolvePrompt();
+    await sendPromise;
+
+    const chunks = events.filter((e) => e.type === 'message-chunk');
+    expect(chunks.length).toBe(2);
+    if (chunks[0].type === 'message-chunk') expect(chunks[0].delta).toBe('你好');
+    if (chunks[1].type === 'message-chunk') expect(chunks[1].delta).toBe('！');
+    const complete = events.find((e) => e.type === 'message-complete');
+    expect(complete).toBeDefined();
+  });
+
+  it('handleSessionUpdate 忽略 agent_thought_chunk', async () => {
+    const events: AdapterEvent[] = [];
+    let capturedCallbacks: AcpClientCallbacks | null = null;
+    const streamingFactory: AcpClientFactory = (_url, callbacks) => {
+      capturedCallbacks = callbacks;
+      return mockClient;
+    };
+    const streamAdapter = new WebAcpAdapter(streamingFactory);
+    streamAdapter.subscribe((e) => events.push(e));
+    await streamAdapter.connect({ endpoint: 'http://127.0.0.1:3000', workspace: '/tmp' });
+    await streamAdapter.createSession({ path: '/tmp' });
+
+    let resolvePrompt!: () => void;
+    mockClient.sessionPrompt = vi.fn(
+      () => new Promise<void>((r) => { resolvePrompt = r; }),
+    );
+
+    const sendPromise = streamAdapter.sendMessage('test-session-id', '你好');
+
+    capturedCallbacks!.onSessionUpdate!({
+      sessionId: 'test-session-id',
+      update: {
+        sessionUpdate: 'agent_thought_chunk',
+        content: { type: 'text', text: '思考内容' },
+      },
+    });
+
+    resolvePrompt();
+    await sendPromise;
+
+    const chunks = events.filter((e) => e.type === 'message-chunk');
+    expect(chunks.length).toBe(0);
   });
 });
