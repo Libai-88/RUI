@@ -6,6 +6,8 @@ import { ChatView } from './components/ChatView';
 import { WebAcpAdapter } from './acp/webAcpAdapter';
 import { createGooseClientFactory } from './acp/gooseClientFactory';
 
+type ConnectionState = 'connecting' | 'connected' | 'error';
+
 /**
  * RUI Web 应用根组件
  *
@@ -42,6 +44,25 @@ function ConnectedApp({ config }: { config: AcpConnectionConfig }) {
     () => new WebAcpAdapter(createGooseClientFactory()),
     [],
   );
+  const [connectionState, setConnectionState] =
+    useState<ConnectionState>('connecting');
+  const [retryKey, setRetryKey] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    setConnectionState('connecting');
+    adapter
+      .connect(config)
+      .then(() => {
+        if (!cancelled) setConnectionState('connected');
+      })
+      .catch(() => {
+        if (!cancelled) setConnectionState('error');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [adapter, config, retryKey]);
 
   return (
     <div style={{ display: 'flex', height: '100vh', flexDirection: 'column' }}>
@@ -52,8 +73,63 @@ function ConnectedApp({ config }: { config: AcpConnectionConfig }) {
         </span>
       </header>
       <main style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-        <ChatView adapter={adapter} workspace={{ path: config.workspace }} />
+        {connectionState === 'connecting' && <CenteredHint text="正在连接…" />}
+        {connectionState === 'error' && (
+          <ConnectionError onRetry={() => setRetryKey((k) => k + 1)} />
+        )}
+        {connectionState === 'connected' && (
+          <ChatView adapter={adapter} workspace={{ path: config.workspace }} />
+        )}
       </main>
+    </div>
+  );
+}
+
+function CenteredHint({ text }: { text: string }) {
+  return (
+    <div
+      style={{
+        flex: 1,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        color: '#666',
+      }}
+    >
+      {text}
+    </div>
+  );
+}
+
+function ConnectionError({ onRetry }: { onRetry: () => void }) {
+  return (
+    <div
+      style={{
+        flex: 1,
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 12,
+        color: '#c53030',
+      }}
+    >
+      <div>连接 ACP 服务失败</div>
+      <button
+        type="button"
+        onClick={onRetry}
+        style={{
+          padding: '6px 16px',
+          border: '1px solid #c53030',
+          borderRadius: 4,
+          background: '#fff',
+          color: '#c53030',
+          cursor: 'pointer',
+          fontSize: 14,
+        }}
+      >
+        重试
+      </button>
     </div>
   );
 }
