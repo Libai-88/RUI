@@ -1,8 +1,10 @@
 import { useState, useEffect, useMemo } from 'react';
-import type { AcpConnectionConfig } from './product/types';
+import type { AcpConnectionConfig, SessionId } from './product/types';
 import { loadConnectionConfig, saveConnectionConfig } from './connection/connectionConfig';
 import { ConnectionWizard } from './components/ConnectionWizard';
 import { ChatView } from './components/ChatView';
+import { SessionList } from './components/SessionList';
+import { useSessionList } from './hooks/useSessionList';
 import { WebAcpAdapter } from './acp/webAcpAdapter';
 import { createGooseClientFactory } from './acp/gooseClientFactory';
 
@@ -64,6 +66,21 @@ function ConnectedApp({ config }: { config: AcpConnectionConfig }) {
     };
   }, [adapter, config, retryKey]);
 
+  const sessionList = useSessionList(
+    connectionState === 'connected' ? adapter : null,
+  );
+  const [forceNewSession, setForceNewSession] = useState(false);
+
+  function handleCreateNew() {
+    setForceNewSession(true);
+    void sessionList.createNewSession();
+  }
+
+  function handleSelectSession(sessionId: SessionId) {
+    setForceNewSession(false);
+    void sessionList.selectSession(sessionId);
+  }
+
   return (
     <div style={{ display: 'flex', height: '100vh', flexDirection: 'column' }}>
       <header style={{ padding: '8px 16px', borderBottom: '1px solid #e5e7eb' }}>
@@ -72,13 +89,38 @@ function ConnectedApp({ config }: { config: AcpConnectionConfig }) {
           {config.endpoint}
         </span>
       </header>
-      <main style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <main style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
         {connectionState === 'connecting' && <CenteredHint text="正在连接…" />}
         {connectionState === 'error' && (
           <ConnectionError onRetry={() => setRetryKey((k) => k + 1)} />
         )}
         {connectionState === 'connected' && (
-          <ChatView adapter={adapter} workspace={{ path: config.workspace }} />
+          <>
+            <SessionList
+              sessions={sessionList.sessions}
+              activeSessionId={sessionList.activeSessionId}
+              loadingSessionId={sessionList.loadingSessionId}
+              loading={sessionList.loading}
+              onSelect={handleSelectSession}
+              onCreateNew={handleCreateNew}
+              onRefresh={sessionList.refresh}
+            />
+            <div
+              style={{
+                flex: 1,
+                display: 'flex',
+                flexDirection: 'column',
+                overflow: 'hidden',
+              }}
+            >
+              <ChatView
+                adapter={adapter}
+                workspace={{ path: config.workspace }}
+                sessionId={forceNewSession ? null : sessionList.activeSessionId}
+                onSessionCreated={(id) => handleSelectSession(id)}
+              />
+            </div>
+          </>
         )}
       </main>
     </div>

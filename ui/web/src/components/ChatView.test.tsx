@@ -173,4 +173,33 @@ describe('ChatView', () => {
     expect(adapter.sendMessage).toHaveBeenCalledTimes(2);
     expect(adapter.sendMessage).toHaveBeenLastCalledWith('sess-1', '重新发我');
   });
+
+  it('提供 sessionId 时不创建新会话', async () => {
+    const { adapter } = createFakeAdapter();
+    render(
+      <ChatView
+        adapter={adapter}
+        workspace={{ path: '/tmp/proj' }}
+        sessionId="existing-1"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('工作目录：/tmp/proj')).toBeInTheDocument();
+    });
+    expect(adapter.createSession).not.toHaveBeenCalled();
+  });
+
+  it('提供 sessionId 时直接渲染该会话不显示创建加载态', () => {
+    const { adapter } = createFakeAdapter();
+    render(
+      <ChatView
+        adapter={adapter}
+        workspace={{ path: '/tmp/proj' }}
+        sessionId="existing-1"
+      />,
+    );
+    expect(screen.queryByText('正在创建会话…')).not.toBeInTheDocument();
+    expect(screen.getByText('工作目录：/tmp/proj')).toBeInTheDocument();
+  });
 });

@@ -7,15 +7,33 @@ import { MessageInput } from './MessageInput';
 export function ChatView({
   adapter,
   workspace,
+  sessionId: providedSessionId,
+  onSessionCreated,
 }: {
   adapter: AcpAdapter;
   workspace: Workspace;
+  sessionId?: SessionId | null;
+  onSessionCreated?: (sessionId: SessionId) => void;
 }) {
-  const [sessionId, setSessionId] = useState<SessionId | null>(null);
+  const [sessionId, setSessionId] = useState<SessionId | null>(providedSessionId ?? null);
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!providedSessionId);
 
   useEffect(() => {
+    if (providedSessionId !== undefined) {
+      setSessionId(providedSessionId);
+      setLoading(false);
+      setError(null);
+    } else {
+      setSessionId(null);
+      setLoading(true);
+    }
+  }, [providedSessionId]);
+
+  useEffect(() => {
+    if (providedSessionId !== undefined && providedSessionId !== null) return;
+    if (sessionId) return;
+
     let cancelled = false;
     setLoading(true);
     setError(null);
@@ -25,6 +43,7 @@ export function ChatView({
         if (cancelled) return;
         setSessionId(id);
         setLoading(false);
+        onSessionCreated?.(id);
       })
       .catch((err: unknown) => {
         if (cancelled) return;
@@ -35,7 +54,7 @@ export function ChatView({
     return () => {
       cancelled = true;
     };
-  }, [adapter, workspace]);
+  }, [adapter, workspace, providedSessionId, sessionId, onSessionCreated]);
 
   function handleRetry() {
     setLoading(true);
@@ -45,6 +64,7 @@ export function ChatView({
       .then((id) => {
         setSessionId(id);
         setLoading(false);
+        onSessionCreated?.(id);
       })
       .catch((err: unknown) => {
         const message = err instanceof Error ? err.message : '未知错误';
@@ -96,7 +116,9 @@ export function ChatView({
 
   if (!sessionId) return null;
 
-  return <ChatSession adapter={adapter} sessionId={sessionId} workspace={workspace} />;
+  return (
+    <ChatSession key={sessionId} adapter={adapter} sessionId={sessionId} workspace={workspace} />
+  );
 }
 
 function ChatSession({

@@ -18,9 +18,16 @@ export interface UseChatResult {
 export function useChat(
   adapter: AcpAdapter | null,
   sessionId: SessionId | null,
+  initialMessages?: Message[],
 ): UseChatResult {
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<Message[]>(initialMessages ?? []);
   const [status, setStatus] = useState<SessionStatus>('idle');
+
+  useEffect(() => {
+    setMessages(initialMessages ?? []);
+    // intentionally not depending on initialMessages to avoid resets on re-render
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId]);
 
   useEffect(() => {
     if (!adapter || !sessionId) return;
@@ -39,6 +46,36 @@ export function useChat(
       } else if (event.type === 'connection-interrupted') {
         setMessages((prev) => markInterrupted(prev, event.messageId));
         setStatus('interrupted');
+      } else if (event.type === 'tool-call-started') {
+        const toolMessage: Message = {
+          id: generateId('tool-msg'),
+          role: 'tool',
+          toolInvocation: event.invocation,
+          createdAt: new Date().toISOString(),
+        };
+        setMessages((prev) => [...prev, toolMessage]);
+      } else if (event.type === 'tool-call-updated') {
+        setMessages((prev) => prev.map((m) => {
+          if (m.role !== 'tool') return m;
+          if (m.toolInvocation.id !== event.invocationId) return m;
+          return { ...m, toolInvocation: { ...m.toolInvocation, status: event.status } };
+        }));
+      } else if (event.type === 'tool-result') {
+        setMessages((prev) => prev.map((m) => {
+          if (m.role !== 'tool') return m;
+          if (m.toolInvocation.id !== event.invocationId) return m;
+          return {
+            ...m,
+            toolInvocation: {
+              ...m.toolInvocation,
+              result: event.result,
+              status: event.result.isError ? 'failed' : 'completed',
+            },
+          };
+        }));
+      } else if (event.type === 'session-loaded') {
+        setMessages(event.messages);
+        setStatus('idle');
       }
     });
   }, [adapter, sessionId]);
