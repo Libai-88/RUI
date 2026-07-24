@@ -7,6 +7,7 @@ import { SessionList } from './components/SessionList';
 import { useSessionList } from './hooks/useSessionList';
 import { WebAcpAdapter } from './acp/webAcpAdapter';
 import { createGooseClientFactory } from './acp/gooseClientFactory';
+import { ThreeColumnLayout } from './components/ThreeColumnLayout';
 
 type ConnectionState = 'connecting' | 'connected' | 'error';
 
@@ -95,32 +96,27 @@ function ConnectedApp({ config }: { config: AcpConnectionConfig }) {
           <ConnectionError onRetry={() => setRetryKey((k) => k + 1)} />
         )}
         {connectionState === 'connected' && (
-          <>
-            <SessionList
-              sessions={sessionList.sessions}
-              activeSessionId={sessionList.activeSessionId}
-              loadingSessionId={sessionList.loadingSessionId}
-              loading={sessionList.loading}
-              onSelect={handleSelectSession}
-              onCreateNew={handleCreateNew}
-              onRefresh={sessionList.refresh}
-            />
-            <div
-              style={{
-                flex: 1,
-                display: 'flex',
-                flexDirection: 'column',
-                overflow: 'hidden',
-              }}
-            >
+          <ThreeColumnLayout
+            left={
+              <SessionList
+                sessions={sessionList.sessions}
+                activeSessionId={sessionList.activeSessionId}
+                loadingSessionId={sessionList.loadingSessionId}
+                loading={sessionList.loading}
+                onSelect={handleSelectSession}
+                onCreateNew={handleCreateNew}
+                onRefresh={sessionList.refresh}
+              />
+            }
+            center={
               <ChatView
                 adapter={adapter}
                 workspace={{ path: config.workspace }}
                 sessionId={forceNewSession ? null : sessionList.activeSessionId}
                 onSessionCreated={(id) => handleSelectSession(id)}
               />
-            </div>
-          </>
+            }
+          />
         )}
       </main>
     </div>
