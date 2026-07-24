@@ -7,6 +7,7 @@ import type {
   SessionSummary,
   Workspace,
   Message,
+  PermissionRequest,
   PermissionRequestId,
   ConnectionState,
 } from '../product/types';
@@ -78,10 +79,33 @@ export interface AcpSessionNotification {
   };
 }
 
+/** ACP 权限选项（对应 PermissionOptionKind） */
+export interface AcpPermissionOption {
+  optionId: string;
+  kind: 'allow_once' | 'allow_always' | 'reject_once' | 'reject_always';
+  name: string;
+}
+
+/** ACP 权限请求通知 */
+export interface AcpPermissionRequestNotification {
+  sessionId: string;
+  toolCallId: string;
+  toolName: string;
+  description: string;
+  options: AcpPermissionOption[];
+}
+
+/** 客户端对权限请求的决策，optionId 为 null 表示取消/无决策 */
+export interface AcpPermissionDecision {
+  optionId: string | null;
+}
+
 /** Callbacks the ACP client invokes for inbound notifications */
 export interface AcpClientCallbacks {
   onSessionUpdate?(notification: AcpSessionNotification): void;
   onDisconnect?(reason?: string): void;
+  /** Agent 请求执行工具前的权限确认，client 必须 resolve 才能继续 */
+  onPermissionRequest?(request: AcpPermissionRequestNotification): Promise<AcpPermissionDecision>;
 }
 
 /** 客户端工厂函数类型 */
@@ -95,6 +119,13 @@ interface SessionMessageContext {
   messageId: string;
   /** 每次 sendMessage 生成的唯一 promptAttemptId，用于识别过期尝试 */
   promptAttemptId: string;
+}
+
+/** 单个 pending permission 请求的运行时上下文 */
+interface PendingPermissionEntry {
+  toolCallId: string;
+  options: AcpPermissionOption[];
+  resolve: (decision: AcpPermissionDecision) => void;
 }
 
 /**
@@ -114,8 +145,8 @@ export class WebAcpAdapter implements AcpAdapter {
   private config: AcpConnectionConfig | null = null;
   /** Per-session 活跃 prompt 上下文，key 为 sessionId */
   private sessionMessageContext: Map<SessionId, SessionMessageContext> = new Map();
-  /** Per-session pending permission 请求 ID 集合 */
-  private pendingPermissions: Map<SessionId, Set<PermissionRequestId>> = new Map();
+  /** Per-session pending permission 请求，key 为 sessionId -> requestId -> entry */
+  private pendingPermissions: Map<SessionId, Map<PermissionRequestId, PendingPermissionEntry>> = new Map();
 
   constructor(private clientFactory: AcpClientFactory) {}
 
@@ -132,6 +163,7 @@ export class WebAcpAdapter implements AcpAdapter {
       this.client = this.clientFactory(baseUrl, {
         onSessionUpdate: (notification) => this.handleSessionUpdate(notification),
         onDisconnect: (reason) => this.handleDisconnect(reason),
+        onPermissionRequest: (request) => this.handlePermissionRequest(request),
       });
       this.stateManager.tryTransition(states.connected());
       this.emit({ type: 'connection-state-changed', state: this.stateManager.getState() });
@@ -147,7 +179,9 @@ export class WebAcpAdapter implements AcpAdapter {
     this.client = null;
     this.config = null;
     this.sessionMessageContext.clear();
-    this.pendingPermissions.clear();
+    for (const sessionId of Array.from(this.pendingPermissions.keys())) {
+      this.cancelPendingPermissionsForSession(sessionId);
+    }
     this.stateManager.reset();
     this.emit({ type: 'connection-state-changed', state: this.stateManager.getState() });
   }
@@ -246,7 +280,8 @@ export class WebAcpAdapter implements AcpAdapter {
 
     await this.client.sessionCancel({ sessionId });
     this.sessionMessageContext.delete(sessionId);
-    this.pendingPermissions.delete(sessionId);
+    // 取消 Session 时同时取消该 Session 所有 pending permission 请求
+    this.cancelPendingPermissionsForSession(sessionId);
     this.emit({ type: 'session-cancelled', sessionId });
     this.stateManager.tryTransition(states.connected());
   }
@@ -255,34 +290,84 @@ export class WebAcpAdapter implements AcpAdapter {
     sessionId: SessionId,
     requestId: PermissionRequestId,
     allowed: boolean,
+    scope: 'once' | 'always' = 'once',
   ): Promise<void> {
-    if (!this.client) throw new Error('ACP 未连接');
-
-    await this.client.sessionUpdate({
-      sessionId,
-      update: {
-        sessionId,
-        actions: [
-          {
-            type: allowed ? 'accept' : 'reject',
-            requestId,
-          },
-        ],
-      },
-    });
-
-    // 从该 Session 的 pending 集合中移除
     const pending = this.pendingPermissions.get(sessionId);
-    if (pending) {
-      pending.delete(requestId);
-      if (pending.size === 0) this.pendingPermissions.delete(sessionId);
+    const entry = pending?.get(requestId);
+    if (!entry) {
+      // 没有本地 pending 记录（例如已被取消或重复响应），仍发出事件保持幂等
+      this.emit({ type: 'permission-resolved', sessionId, requestId, allowed });
+      return;
     }
+
+    const optionId = this.pickPermissionOptionId(entry.options, allowed, scope);
+    pending?.delete(requestId);
+    if (pending && pending.size === 0) this.pendingPermissions.delete(sessionId);
+
+    // resolve 本地等待的 Promise，真正放行 agent 侧的 requestPermission 调用
+    entry.resolve({ optionId });
 
     this.emit({
       type: 'permission-resolved',
       sessionId,
       requestId,
       allowed,
+    });
+  }
+
+  /** 根据用户决策和策略范围在 ACP 权限选项中选出对应 optionId */
+  private pickPermissionOptionId(
+    options: AcpPermissionOption[],
+    allowed: boolean,
+    scope: 'once' | 'always',
+  ): string | null {
+    const kind = allowed
+      ? scope === 'always' ? 'allow_always' : 'allow_once'
+      : scope === 'always' ? 'reject_always' : 'reject_once';
+    const match = options.find((o) => o.kind === kind);
+    if (match) return match.optionId;
+    // 回退：找不到精确 kind 时，优先匹配 allow/reject 的任意选项
+    const fallback = options.find((o) =>
+      allowed ? o.kind.startsWith('allow_') : o.kind.startsWith('reject_'),
+    );
+    return fallback?.optionId ?? null;
+  }
+
+  /** 取消指定 Session 的所有 pending permission 请求（决策为取消） */
+  private cancelPendingPermissionsForSession(sessionId: SessionId): void {
+    const pending = this.pendingPermissions.get(sessionId);
+    if (!pending) return;
+    for (const entry of pending.values()) {
+      entry.resolve({ optionId: null });
+    }
+    this.pendingPermissions.delete(sessionId);
+  }
+
+  /**
+   * 处理 Agent 发起的权限请求：记录 pending 状态、发射 permission-requested 事件，
+   * 并返回一个只在用户响应（或 Session 被取消/断开）后才 resolve 的 Promise。
+   */
+  private handlePermissionRequest(
+    request: AcpPermissionRequestNotification,
+  ): Promise<AcpPermissionDecision> {
+    const { sessionId, toolCallId, toolName, description, options } = request;
+    const requestId: PermissionRequestId = toolCallId;
+
+    return new Promise<AcpPermissionDecision>((resolve) => {
+      let pending = this.pendingPermissions.get(sessionId);
+      if (!pending) {
+        pending = new Map();
+        this.pendingPermissions.set(sessionId, pending);
+      }
+      pending.set(requestId, { toolCallId, options, resolve });
+
+      const permissionRequest: PermissionRequest = {
+        id: requestId,
+        toolName,
+        description,
+        status: 'pending',
+      };
+      this.emit({ type: 'permission-requested', sessionId, request: permissionRequest });
     });
   }
 
@@ -367,7 +452,10 @@ export class WebAcpAdapter implements AcpAdapter {
       });
     }
     this.sessionMessageContext.clear();
-    this.pendingPermissions.clear();
+    // 断线时所有 pending permission 请求都应被取消，resolve 其等待中的 Promise
+    for (const sessionId of Array.from(this.pendingPermissions.keys())) {
+      this.cancelPendingPermissionsForSession(sessionId);
+    }
     this.stateManager.tryTransition(states.disconnected());
     this.emit({ type: 'connection-state-changed', state: this.stateManager.getState() });
   }
@@ -429,17 +517,20 @@ export class WebAcpAdapter implements AcpAdapter {
 
   /** 获取指定 Session 的 pending permission 请求 ID 列表 */
   getPendingPermissionIds(sessionId: SessionId): PermissionRequestId[] {
-    const set = this.pendingPermissions.get(sessionId);
-    return set ? Array.from(set) : [];
+    const map = this.pendingPermissions.get(sessionId);
+    return map ? Array.from(map.keys()) : [];
   }
 
-  /** 记录指定 Session 的 pending permission 请求（供 permission 流程使用） */
+  /**
+   * 记录指定 Session 的 pending permission 请求（供测试使用）。
+   * 生产路径通过 handlePermissionRequest 记录，携带真实的 options 和 resolve。
+   */
   registerPendingPermission(sessionId: SessionId, requestId: PermissionRequestId): void {
-    let set = this.pendingPermissions.get(sessionId);
-    if (!set) {
-      set = new Set();
-      this.pendingPermissions.set(sessionId, set);
+    let map = this.pendingPermissions.get(sessionId);
+    if (!map) {
+      map = new Map();
+      this.pendingPermissions.set(sessionId, map);
     }
-    set.add(requestId);
+    map.set(requestId, { toolCallId: requestId, options: [], resolve: () => {} });
   }
 }

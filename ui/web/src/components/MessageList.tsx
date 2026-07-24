@@ -5,10 +5,17 @@ import { UserMessageView } from './messages/UserMessageView';
 import { SystemMessageView } from './messages/SystemMessageView';
 import { ErrorMessageView } from './messages/ErrorMessageView';
 import { ToolInvocationCard } from './messages/ToolInvocationCard';
+import { PermissionRequestCard } from './messages/PermissionRequestCard';
 
 const NEAR_BOTTOM_PX = 48;
 
-export function MessageList({ messages }: { messages: Message[] }) {
+export function MessageList({
+  messages,
+  onRespondPermission,
+}: {
+  messages: Message[];
+  onRespondPermission?: (requestId: string, allowed: boolean, scope?: 'once' | 'always') => void;
+}) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const [stickToBottom, setStickToBottom] = useState(true);
@@ -53,7 +60,7 @@ export function MessageList({ messages }: { messages: Message[] }) {
         }}
       >
         {messages.map((m) => (
-          <MessageBubble key={m.id} message={m} />
+          <MessageBubble key={m.id} message={m} onRespondPermission={onRespondPermission} />
         ))}
         <div ref={bottomRef} data-testid="message-list-bottom" />
       </div>
@@ -71,7 +78,13 @@ export function MessageList({ messages }: { messages: Message[] }) {
   );
 }
 
-function MessageBubble({ message }: { message: Message }) {
+function MessageBubble({
+  message,
+  onRespondPermission,
+}: {
+  message: Message;
+  onRespondPermission?: (requestId: string, allowed: boolean, scope?: 'once' | 'always') => void;
+}) {
   switch (message.role) {
     case 'user':
       return <UserMessageView message={message} />;
@@ -83,6 +96,15 @@ function MessageBubble({ message }: { message: Message }) {
       return <ErrorMessageView message={message} />;
     case 'tool':
       return <ToolInvocationCard message={message} />;
+    case 'permission':
+      return (
+        <PermissionRequestCard
+          message={message}
+          onRespond={(requestId, allowed, scope) =>
+            onRespondPermission?.(requestId, allowed, scope)
+          }
+        />
+      );
     default:
       return null;
   }

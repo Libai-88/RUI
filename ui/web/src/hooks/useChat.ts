@@ -1,5 +1,12 @@
-import { useState, useEffect, useCallback } from 'react';
-import type { AcpAdapter, Message, SessionId, SessionStatus } from '../product/types';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import type {
+  AcpAdapter,
+  Message,
+  PermissionMessage,
+  PermissionRequest,
+  SessionId,
+  SessionStatus,
+} from '../product/types';
 import { accumulateChunk, finalizeMessage, markInterrupted } from '../chat/messageAccumulator';
 
 function generateId(prefix: string): string {
@@ -13,6 +20,10 @@ export interface UseChatResult {
   cancel: () => Promise<void>;
   reconnect: () => Promise<void>;
   resendLastMessage: () => Promise<void>;
+  /** 响应权限请求；scope 为 'always' 时表示"始终允许/始终拒绝" */
+  resolvePermission: (requestId: string, allowed: boolean, scope?: 'once' | 'always') => Promise<void>;
+  /** 当前 Session 中所有仍处于 pending 状态的权限请求，供上下文区展示 */
+  pendingPermissions: PermissionRequest[];
 }
 
 export function useChat(
@@ -82,6 +93,26 @@ export function useChat(
       } else if (event.type === 'session-loaded') {
         setMessages(event.messages);
         setStatus('idle');
+      } else if (event.type === 'permission-requested') {
+        const permissionMessage: Message = {
+          id: `permission-${event.request.id}`,
+          role: 'permission',
+          request: event.request,
+          createdAt: new Date().toISOString(),
+        };
+        setMessages((prev) => [...prev, permissionMessage]);
+        // Session 在 pending permission 解决前不恢复 streaming 展示
+        setStatus('waiting-for-permission');
+      } else if (event.type === 'permission-resolved') {
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.role === 'permission' && m.request.id === event.requestId
+              ? { ...m, request: { ...m.request, status: event.allowed ? 'allowed' : 'denied' } }
+              : m,
+          ),
+        );
+        // 权限决议后，若当前正处于等待权限状态，恢复为 streaming（agent 会继续该轮响应）
+        setStatus((prev) => (prev === 'waiting-for-permission' ? 'streaming' : prev));
       }
     });
   }, [adapter, sessionId]);
@@ -122,5 +153,31 @@ export function useChat(
     await adapter.sendMessage(sessionId, lastUser.content);
   }, [adapter, sessionId, messages]);
 
-  return { messages, status, sendMessage, cancel, reconnect, resendLastMessage };
+  const resolvePermission = useCallback(
+    async (requestId: string, allowed: boolean, scope: 'once' | 'always' = 'once') => {
+      if (!adapter || !sessionId) return;
+      await adapter.respondToPermission(sessionId, requestId, allowed, scope);
+    },
+    [adapter, sessionId],
+  );
+
+  const pendingPermissions = useMemo(
+    () =>
+      messages
+        .filter((m): m is PermissionMessage => m.role === 'permission')
+        .map((m) => m.request)
+        .filter((r) => r.status === 'pending'),
+    [messages],
+  );
+
+  return {
+    messages,
+    status,
+    sendMessage,
+    cancel,
+    reconnect,
+    resendLastMessage,
+    resolvePermission,
+    pendingPermissions,
+  };
 }

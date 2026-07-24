@@ -1,6 +1,47 @@
 import { GooseClient } from '@aaif/goose-sdk';
 import { PROTOCOL_VERSION } from '@agentclientprotocol/sdk';
-import type { AcpClient, AcpClientCallbacks, AcpSessionNotification } from './webAcpAdapter';
+import type { RequestPermissionRequest, RequestPermissionResponse } from '@agentclientprotocol/sdk';
+import type {
+  AcpClient,
+  AcpClientCallbacks,
+  AcpPermissionRequestNotification,
+  AcpSessionNotification,
+} from './webAcpAdapter';
+
+/** 从 ACP 权限请求的 toolCall.content 中提取文本说明作为 description */
+function extractPermissionDescription(request: RequestPermissionRequest): string {
+  for (const content of request.toolCall.content ?? []) {
+    if (content.type === 'content' && content.content.type === 'text') {
+      return content.content.text;
+    }
+  }
+  return request.toolCall.title ?? '';
+}
+
+/** 将 SDK 的 RequestPermissionRequest 转换为 RUI adapter 需要的通知形状 */
+function toPermissionNotification(
+  request: RequestPermissionRequest,
+): AcpPermissionRequestNotification {
+  return {
+    sessionId: request.sessionId,
+    toolCallId: request.toolCall.toolCallId,
+    toolName: request.toolCall.title || request.toolCall.toolCallId,
+    description: extractPermissionDescription(request),
+    options: request.options.map((o) => ({
+      optionId: o.optionId,
+      kind: o.kind,
+      name: o.name,
+    })),
+  };
+}
+
+/** 将 RUI adapter 的决策转换回 SDK 期望的 RequestPermissionResponse */
+function toPermissionResponse(optionId: string | null): RequestPermissionResponse {
+  if (!optionId) {
+    return { outcome: { outcome: 'cancelled' } };
+  }
+  return { outcome: { outcome: 'selected', optionId } };
+}
 
 export function createGooseClientFactory(): (
   baseUrl: string,
@@ -13,8 +54,15 @@ export function createGooseClientFactory(): (
           callbacks.onSessionUpdate?.(notification as AcpSessionNotification);
           return Promise.resolve();
         },
-        requestPermission: () =>
-          Promise.resolve({ outcome: { outcome: 'cancelled' } }),
+        requestPermission: async (request: RequestPermissionRequest) => {
+          if (!callbacks.onPermissionRequest) {
+            return { outcome: { outcome: 'cancelled' } };
+          }
+          const decision = await callbacks.onPermissionRequest(
+            toPermissionNotification(request),
+          );
+          return toPermissionResponse(decision.optionId);
+        },
       }),
       baseUrl,
     );

@@ -478,4 +478,150 @@ describe('useChat', () => {
       expect(assistant.content).toBe('partial');
     }
   });
+
+  // -------------------------------------------------------------------------
+  // #16 Permission request 交互
+  // -------------------------------------------------------------------------
+
+  it('permission-requested 事件添加权限消息并将状态设为 waiting-for-permission', async () => {
+    const { adapter, emit } = createFakeAdapter();
+    const { result } = renderHook(() => useChat(adapter, 'sess-1'));
+
+    act(() => {
+      emit({
+        type: 'permission-requested',
+        sessionId: 'sess-1',
+        request: {
+          id: 'perm-1',
+          toolName: 'write_file',
+          description: '将写入 /tmp/foo.txt',
+          status: 'pending',
+        },
+      });
+    });
+
+    expect(result.current.status).toBe('waiting-for-permission');
+    const permMsg = result.current.messages.find((m) => m.role === 'permission');
+    expect(permMsg).toBeDefined();
+    if (permMsg?.role === 'permission') {
+      expect(permMsg.request.toolName).toBe('write_file');
+      expect(permMsg.request.status).toBe('pending');
+    }
+    expect(result.current.pendingPermissions).toHaveLength(1);
+    expect(result.current.pendingPermissions[0].id).toBe('perm-1');
+  });
+
+  it('permission-resolved 事件更新权限消息状态并从 pendingPermissions 移除', async () => {
+    const { adapter, emit } = createFakeAdapter();
+    const { result } = renderHook(() => useChat(adapter, 'sess-1'));
+
+    act(() => {
+      emit({
+        type: 'permission-requested',
+        sessionId: 'sess-1',
+        request: { id: 'perm-1', toolName: 'write_file', description: '', status: 'pending' },
+      });
+    });
+
+    act(() => {
+      emit({ type: 'permission-resolved', sessionId: 'sess-1', requestId: 'perm-1', allowed: true });
+    });
+
+    const permMsg = result.current.messages.find((m) => m.role === 'permission');
+    if (permMsg?.role === 'permission') {
+      expect(permMsg.request.status).toBe('allowed');
+    }
+    expect(result.current.pendingPermissions).toHaveLength(0);
+    // 权限决议后从 waiting-for-permission 恢复为 streaming
+    expect(result.current.status).toBe('streaming');
+  });
+
+  it('permission-resolved(denied) 将权限消息标记为 denied', async () => {
+    const { adapter, emit } = createFakeAdapter();
+    const { result } = renderHook(() => useChat(adapter, 'sess-1'));
+
+    act(() => {
+      emit({
+        type: 'permission-requested',
+        sessionId: 'sess-1',
+        request: { id: 'perm-1', toolName: 'write_file', description: '', status: 'pending' },
+      });
+    });
+
+    act(() => {
+      emit({ type: 'permission-resolved', sessionId: 'sess-1', requestId: 'perm-1', allowed: false });
+    });
+
+    const permMsg = result.current.messages.find((m) => m.role === 'permission');
+    if (permMsg?.role === 'permission') {
+      expect(permMsg.request.status).toBe('denied');
+    }
+  });
+
+  it('resolvePermission 调用 adapter.respondToPermission', async () => {
+    const { adapter } = createFakeAdapter();
+    const { result } = renderHook(() => useChat(adapter, 'sess-1'));
+
+    await act(async () => {
+      await result.current.resolvePermission('perm-1', true, 'once');
+    });
+
+    expect(adapter.respondToPermission).toHaveBeenCalledWith('sess-1', 'perm-1', true, 'once');
+  });
+
+  it('resolvePermission 默认 scope 为 once', async () => {
+    const { adapter } = createFakeAdapter();
+    const { result } = renderHook(() => useChat(adapter, 'sess-1'));
+
+    await act(async () => {
+      await result.current.resolvePermission('perm-1', false);
+    });
+
+    expect(adapter.respondToPermission).toHaveBeenCalledWith('sess-1', 'perm-1', false, 'once');
+  });
+
+  it('permission 事件忽略其它 session', async () => {
+    const { adapter, emit } = createFakeAdapter();
+    const { result } = renderHook(() => useChat(adapter, 'sess-1'));
+
+    act(() => {
+      emit({
+        type: 'permission-requested',
+        sessionId: 'other-session',
+        request: { id: 'perm-1', toolName: 'write_file', description: '', status: 'pending' },
+      });
+    });
+
+    expect(result.current.messages.length).toBe(0);
+    expect(result.current.pendingPermissions).toHaveLength(0);
+  });
+
+  it('多个权限请求同时 pending 时 pendingPermissions 包含全部', async () => {
+    const { adapter, emit } = createFakeAdapter();
+    const { result } = renderHook(() => useChat(adapter, 'sess-1'));
+
+    act(() => {
+      emit({
+        type: 'permission-requested',
+        sessionId: 'sess-1',
+        request: { id: 'perm-1', toolName: 'write_file', description: '', status: 'pending' },
+      });
+    });
+    act(() => {
+      emit({
+        type: 'permission-requested',
+        sessionId: 'sess-1',
+        request: { id: 'perm-2', toolName: 'read_file', description: '', status: 'pending' },
+      });
+    });
+
+    expect(result.current.pendingPermissions).toHaveLength(2);
+
+    act(() => {
+      emit({ type: 'permission-resolved', sessionId: 'sess-1', requestId: 'perm-1', allowed: true });
+    });
+
+    expect(result.current.pendingPermissions).toHaveLength(1);
+    expect(result.current.pendingPermissions[0].id).toBe('perm-2');
+  });
 });

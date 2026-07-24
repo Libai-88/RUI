@@ -11,11 +11,12 @@ export function MessageInput({
   onCancel: () => void;
 }) {
   const [text, setText] = useState('');
-  const isStreaming = status === 'streaming';
-  const canSend = text.trim().length > 0;
+  const isWaitingForPermission = status === 'waiting-for-permission';
+  const isBusy = status === 'streaming' || isWaitingForPermission;
+  const canSend = text.trim().length > 0 && !isWaitingForPermission;
 
   function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
-    if (e.key === 'Escape' && isStreaming) {
+    if (e.key === 'Escape' && isBusy) {
       e.preventDefault();
       onCancel();
       return;
@@ -27,7 +28,7 @@ export function MessageInput({
   }
 
   function handleSend() {
-    if (!canSend || isStreaming) return;
+    if (!canSend || isBusy) return;
     const value = text;
     setText('');
     onSend(value);
@@ -51,7 +52,12 @@ export function MessageInput({
         value={text}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={handleKeyDown}
-        placeholder="输入消息，Enter 发送，Shift+Enter 换行"
+        placeholder={
+          isWaitingForPermission
+            ? '等待权限确认后可继续发送…'
+            : '输入消息，Enter 发送，Shift+Enter 换行'
+        }
+        disabled={isWaitingForPermission}
         style={{
           flex: 1,
           padding: '8px 12px',
@@ -67,7 +73,7 @@ export function MessageInput({
         }}
         rows={1}
       />
-      {isStreaming ? (
+      {isBusy ? (
         <button
           type="button"
           onClick={handleCancel}

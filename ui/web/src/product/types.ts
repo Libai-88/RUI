@@ -64,7 +64,13 @@ export type MessageId = string;
 export type MessageRole = 'user' | 'assistant' | 'system';
 
 /** RUI 产品层消息联合类型 */
-export type Message = UserMessage | AssistantMessage | SystemMessage | ToolMessage | ErrorMessage;
+export type Message =
+  | UserMessage
+  | AssistantMessage
+  | SystemMessage
+  | ToolMessage
+  | PermissionMessage
+  | ErrorMessage;
 
 /** 用户消息 */
 export interface UserMessage {
@@ -96,6 +102,14 @@ export interface ToolMessage {
   id: MessageId;
   role: 'tool';
   toolInvocation: ToolInvocation;
+  createdAt: string;
+}
+
+/** 权限请求消息（消息流中的权限请求卡片） */
+export interface PermissionMessage {
+  id: MessageId;
+  role: 'permission';
+  request: PermissionRequest;
   createdAt: string;
 }
 
@@ -216,8 +230,17 @@ export interface AcpAdapter {
   sendMessage(sessionId: SessionId, content: string): Promise<MessageId>;
   /** 取消当前生成 */
   cancelSession(sessionId: SessionId): Promise<void>;
-  /** 响应权限请求 */
-  respondToPermission(sessionId: SessionId, requestId: PermissionRequestId, allowed: boolean): Promise<void>;
+  /**
+   * 响应权限请求
+   * @param scope 决策范围，默认 'once'（本次允许/拒绝）。保留 'always'
+   * 扩展位供后续实现"始终允许/始终拒绝"策略。
+   */
+  respondToPermission(
+    sessionId: SessionId,
+    requestId: PermissionRequestId,
+    allowed: boolean,
+    scope?: 'once' | 'always',
+  ): Promise<void>;
   /** 重连（断线恢复时调用） */
   reconnect?(): Promise<void>;
 }

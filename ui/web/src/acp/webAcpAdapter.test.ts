@@ -962,4 +962,222 @@ describe('WebAcpAdapter', () => {
     resolvePrompt();
     await sendPromise.catch(() => {});
   });
+
+  // -------------------------------------------------------------------------
+  // #16 Permission request 交互
+  // -------------------------------------------------------------------------
+
+  function createPermissionAdapter() {
+    const events: AdapterEvent[] = [];
+    let capturedCallbacks: AcpClientCallbacks | null = null;
+    const factory: AcpClientFactory = (_url, callbacks) => {
+      capturedCallbacks = callbacks;
+      return mockClient;
+    };
+    const permAdapter = new WebAcpAdapter(factory);
+    permAdapter.subscribe((e) => events.push(e));
+    return { permAdapter, events, getCallbacks: () => capturedCallbacks };
+  }
+
+  it('onPermissionRequest 发射 permission-requested 事件，携带工具名和说明', async () => {
+    const { permAdapter, events, getCallbacks } = createPermissionAdapter();
+    await permAdapter.connect({ endpoint: 'http://127.0.0.1:3000', workspace: '/tmp' });
+
+    void getCallbacks()!.onPermissionRequest!({
+      sessionId: 'session-A',
+      toolCallId: 'tool-1',
+      toolName: 'write_file',
+      description: '将写入 /tmp/foo.txt',
+      options: [
+        { optionId: 'opt-allow', kind: 'allow_once', name: '允许' },
+        { optionId: 'opt-reject', kind: 'reject_once', name: '拒绝' },
+      ],
+    });
+
+    const requested = events.find((e) => e.type === 'permission-requested');
+    expect(requested).toBeDefined();
+    if (requested?.type === 'permission-requested') {
+      expect(requested.sessionId).toBe('session-A');
+      expect(requested.request.id).toBe('tool-1');
+      expect(requested.request.toolName).toBe('write_file');
+      expect(requested.request.description).toBe('将写入 /tmp/foo.txt');
+      expect(requested.request.status).toBe('pending');
+    }
+  });
+
+  it('respondToPermission(allowed) resolve 对应 allow_once optionId 并发射 permission-resolved', async () => {
+    const { permAdapter, events, getCallbacks } = createPermissionAdapter();
+    await permAdapter.connect({ endpoint: 'http://127.0.0.1:3000', workspace: '/tmp' });
+
+    const decisionPromise = getCallbacks()!.onPermissionRequest!({
+      sessionId: 'session-A',
+      toolCallId: 'tool-1',
+      toolName: 'write_file',
+      description: '',
+      options: [
+        { optionId: 'opt-allow', kind: 'allow_once', name: '允许' },
+        { optionId: 'opt-reject', kind: 'reject_once', name: '拒绝' },
+      ],
+    });
+
+    await permAdapter.respondToPermission('session-A', 'tool-1', true);
+    const decision = await decisionPromise;
+
+    expect(decision.optionId).toBe('opt-allow');
+    const resolved = events.find((e) => e.type === 'permission-resolved');
+    expect(resolved).toBeDefined();
+    if (resolved?.type === 'permission-resolved') {
+      expect(resolved.requestId).toBe('tool-1');
+      expect(resolved.allowed).toBe(true);
+    }
+  });
+
+  it('respondToPermission(denied) resolve 对应 reject_once optionId', async () => {
+    const { permAdapter, getCallbacks } = createPermissionAdapter();
+    await permAdapter.connect({ endpoint: 'http://127.0.0.1:3000', workspace: '/tmp' });
+
+    const decisionPromise = getCallbacks()!.onPermissionRequest!({
+      sessionId: 'session-A',
+      toolCallId: 'tool-1',
+      toolName: 'write_file',
+      description: '',
+      options: [
+        { optionId: 'opt-allow', kind: 'allow_once', name: '允许' },
+        { optionId: 'opt-reject', kind: 'reject_once', name: '拒绝' },
+      ],
+    });
+
+    await permAdapter.respondToPermission('session-A', 'tool-1', false);
+    const decision = await decisionPromise;
+
+    expect(decision.optionId).toBe('opt-reject');
+  });
+
+  it('respondToPermission scope=always 选择 allow_always/reject_always optionId', async () => {
+    const { permAdapter, getCallbacks } = createPermissionAdapter();
+    await permAdapter.connect({ endpoint: 'http://127.0.0.1:3000', workspace: '/tmp' });
+
+    const decisionPromise = getCallbacks()!.onPermissionRequest!({
+      sessionId: 'session-A',
+      toolCallId: 'tool-1',
+      toolName: 'write_file',
+      description: '',
+      options: [
+        { optionId: 'opt-allow-once', kind: 'allow_once', name: '本次允许' },
+        { optionId: 'opt-allow-always', kind: 'allow_always', name: '始终允许' },
+        { optionId: 'opt-reject-once', kind: 'reject_once', name: '本次拒绝' },
+        { optionId: 'opt-reject-always', kind: 'reject_always', name: '始终拒绝' },
+      ],
+    });
+
+    await permAdapter.respondToPermission('session-A', 'tool-1', true, 'always');
+    const decision = await decisionPromise;
+
+    expect(decision.optionId).toBe('opt-allow-always');
+  });
+
+  it('respondToPermission 找不到精确 kind 时回退到任意 allow/reject 选项', async () => {
+    const { permAdapter, getCallbacks } = createPermissionAdapter();
+    await permAdapter.connect({ endpoint: 'http://127.0.0.1:3000', workspace: '/tmp' });
+
+    const decisionPromise = getCallbacks()!.onPermissionRequest!({
+      sessionId: 'session-A',
+      toolCallId: 'tool-1',
+      toolName: 'write_file',
+      description: '',
+      options: [{ optionId: 'opt-allow-always', kind: 'allow_always', name: '始终允许' }],
+    });
+
+    // 请求 'once' 但选项中只有 'allow_always'，应回退匹配到该选项
+    await permAdapter.respondToPermission('session-A', 'tool-1', true, 'once');
+    const decision = await decisionPromise;
+
+    expect(decision.optionId).toBe('opt-allow-always');
+  });
+
+  it('cancelSession 取消该 Session 的 pending permission，decision.optionId 为 null', async () => {
+    const { permAdapter, getCallbacks } = createPermissionAdapter();
+    await permAdapter.connect({ endpoint: 'http://127.0.0.1:3000', workspace: '/tmp' });
+
+    const decisionPromise = getCallbacks()!.onPermissionRequest!({
+      sessionId: 'session-A',
+      toolCallId: 'tool-1',
+      toolName: 'write_file',
+      description: '',
+      options: [{ optionId: 'opt-allow', kind: 'allow_once', name: '允许' }],
+    });
+
+    await permAdapter.cancelSession('session-A');
+    const decision = await decisionPromise;
+
+    expect(decision.optionId).toBeNull();
+    expect(permAdapter.getPendingPermissionIds('session-A')).toEqual([]);
+  });
+
+  it('断线时所有 Session 的 pending permission 均被取消（optionId 为 null）', async () => {
+    const { permAdapter, getCallbacks } = createPermissionAdapter();
+    await permAdapter.connect({ endpoint: 'http://127.0.0.1:3000', workspace: '/tmp' });
+
+    const decisionA = getCallbacks()!.onPermissionRequest!({
+      sessionId: 'session-A',
+      toolCallId: 'tool-A',
+      toolName: 'write_file',
+      description: '',
+      options: [{ optionId: 'opt-allow', kind: 'allow_once', name: '允许' }],
+    });
+    const decisionB = getCallbacks()!.onPermissionRequest!({
+      sessionId: 'session-B',
+      toolCallId: 'tool-B',
+      toolName: 'read_file',
+      description: '',
+      options: [{ optionId: 'opt-allow', kind: 'allow_once', name: '允许' }],
+    });
+
+    getCallbacks()!.onDisconnect!('connection lost');
+
+    expect((await decisionA).optionId).toBeNull();
+    expect((await decisionB).optionId).toBeNull();
+  });
+
+  it('respondToPermission 无本地 pending 记录时仍发射 permission-resolved（幂等）', async () => {
+    const { permAdapter, events } = createPermissionAdapter();
+    await permAdapter.connect({ endpoint: 'http://127.0.0.1:3000', workspace: '/tmp' });
+
+    await permAdapter.respondToPermission('session-A', 'unknown-tool', true);
+
+    const resolved = events.find((e) => e.type === 'permission-resolved');
+    expect(resolved).toBeDefined();
+  });
+
+  it('多 Session 权限请求互不干扰：各自 resolve 各自的 optionId', async () => {
+    const { permAdapter, getCallbacks } = createPermissionAdapter();
+    await permAdapter.connect({ endpoint: 'http://127.0.0.1:3000', workspace: '/tmp' });
+
+    const decisionA = getCallbacks()!.onPermissionRequest!({
+      sessionId: 'session-A',
+      toolCallId: 'tool-A',
+      toolName: 'write_file',
+      description: '',
+      options: [
+        { optionId: 'a-allow', kind: 'allow_once', name: '允许' },
+        { optionId: 'a-reject', kind: 'reject_once', name: '拒绝' },
+      ],
+    });
+    const decisionB = getCallbacks()!.onPermissionRequest!({
+      sessionId: 'session-B',
+      toolCallId: 'tool-B',
+      toolName: 'read_file',
+      description: '',
+      options: [
+        { optionId: 'b-allow', kind: 'allow_once', name: '允许' },
+        { optionId: 'b-reject', kind: 'reject_once', name: '拒绝' },
+      ],
+    });
+
+    await permAdapter.respondToPermission('session-B', 'tool-B', false);
+    await permAdapter.respondToPermission('session-A', 'tool-A', true);
+
+    expect((await decisionA).optionId).toBe('a-allow');
+    expect((await decisionB).optionId).toBe('b-reject');
+  });
 });
