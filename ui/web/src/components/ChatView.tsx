@@ -132,6 +132,17 @@ function ChatSession({
 }) {
   const { messages, status, sendMessage, cancel, reconnect, resendLastMessage } = useChat(adapter, sessionId);
 
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape' && status === 'streaming') {
+        e.preventDefault();
+        void cancel();
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [status, cancel]);
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <div

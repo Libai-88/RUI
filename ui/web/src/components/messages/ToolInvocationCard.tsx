@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { ToolMessage } from '../../product/types';
 
 const STATUS_COLOR: Record<ToolMessage['toolInvocation']['status'], string> = {
@@ -12,11 +13,17 @@ const STATUS_LABEL: Record<ToolMessage['toolInvocation']['status'], string> = {
   failed: '已失败',
 };
 
+const STATUS_ICON: Record<ToolMessage['toolInvocation']['status'], string> = {
+  'in-progress': '⟳',
+  completed: '✓',
+  failed: '✕',
+};
+
 const cardStyle = (status: ToolMessage['toolInvocation']['status']): React.CSSProperties => ({
   maxWidth: '70%',
   padding: '8px 12px',
   borderRadius: '8px',
-  background: '#f8f9fa',
+  background: status === 'failed' ? '#fff5f5' : '#f8f9fa',
   borderLeft: `4px solid ${STATUS_COLOR[status]}`,
   color: '#333',
   fontSize: 14,
@@ -44,6 +51,7 @@ const statusBadgeStyle = (status: ToolMessage['toolInvocation']['status']): Reac
   fontSize: 12,
   color: STATUS_COLOR[status],
   whiteSpace: 'nowrap',
+  fontWeight: 600,
 });
 
 const statusDotStyle = (status: ToolMessage['toolInvocation']['status']): React.CSSProperties => ({
@@ -77,31 +85,48 @@ const argsStyle: React.CSSProperties = {
   WebkitBoxOrient: 'vertical',
 };
 
-const resultLabelStyle: React.CSSProperties = {
-  fontSize: 12,
-  color: '#666',
+const resultHeaderStyle: React.CSSProperties = {
+  display: 'flex',
+  justifyContent: 'space-between',
+  alignItems: 'center',
   marginTop: '6px',
   marginBottom: '2px',
 };
 
-const resultStyle: React.CSSProperties = {
+const resultLabelStyle: React.CSSProperties = {
+  fontSize: 12,
+  color: '#666',
+};
+
+const toggleBtnStyle: React.CSSProperties = {
+  border: 'none',
+  background: 'transparent',
+  color: '#3182ce',
+  cursor: 'pointer',
+  fontSize: 12,
+  padding: 0,
+};
+
+const resultStyle = (isError: boolean, expanded: boolean): React.CSSProperties => ({
   margin: 0,
   padding: '4px 6px',
-  background: '#e4e7eb',
+  background: isError ? '#fed7d7' : '#e4e7eb',
   borderRadius: '4px',
   fontFamily: 'monospace',
   fontSize: 12,
-  color: '#333',
+  color: isError ? '#c53030' : '#333',
   whiteSpace: 'pre-wrap',
   wordBreak: 'break-all',
-  maxHeight: '200px',
-  overflowY: 'auto',
-};
+  maxHeight: expanded ? 'none' : '80px',
+  overflowY: expanded ? 'visible' : 'hidden',
+});
 
 export function ToolInvocationCard({ message }: { message: ToolMessage }) {
   const { toolInvocation } = message;
   const { status, result } = toolInvocation;
   const label = STATUS_LABEL[status];
+  const [expanded, setExpanded] = useState(false);
+  const canToggle = Boolean(result && result.content.length > 120);
 
   return (
     <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
@@ -112,6 +137,7 @@ export function ToolInvocationCard({ message }: { message: ToolMessage }) {
           </span>
           <span style={statusBadgeStyle(status)} data-testid="status-badge">
             <span style={statusDotStyle(status)} data-testid="status-indicator" />
+            <span data-testid="status-icon">{STATUS_ICON[status]}</span>
             <span data-testid="status-label">{label}</span>
           </span>
         </div>
@@ -125,8 +151,22 @@ export function ToolInvocationCard({ message }: { message: ToolMessage }) {
         )}
         {result && (
           <>
-            <div style={resultLabelStyle}>结果</div>
-            <pre style={resultStyle} data-testid="tool-result">
+            <div style={resultHeaderStyle}>
+              <div style={resultLabelStyle} data-testid="result-label">
+                {result.isError ? '错误' : '结果'}
+              </div>
+              {canToggle && (
+                <button
+                  type="button"
+                  style={toggleBtnStyle}
+                  onClick={() => setExpanded((v) => !v)}
+                  data-testid="result-toggle"
+                >
+                  {expanded ? '收起' : '展开'}
+                </button>
+              )}
+            </div>
+            <pre style={resultStyle(result.isError, expanded)} data-testid="tool-result">
               {result.content}
             </pre>
           </>

@@ -1,6 +1,6 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { ReactNode } from 'react';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { AssistantMessageView } from './AssistantMessageView';
 import type { AssistantMessage } from '../../product/types';
 
@@ -80,5 +80,40 @@ describe('AssistantMessageView', () => {
   it('hides the streaming cursor when not streaming', () => {
     render(<AssistantMessageView message={makeMessage({ isStreaming: false })} />);
     expect(document.querySelector('.rui-streaming-cursor')).toBeNull();
+  });
+
+  beforeEach(() => {
+    Object.assign(navigator, {
+      clipboard: {
+        writeText: vi.fn(async () => undefined),
+      },
+    });
+  });
+
+  it('显示消息复制按钮并复制全文', async () => {
+    render(<AssistantMessageView message={makeMessage({ content: '可复制内容' })} />);
+    fireEvent.click(screen.getByTestId('message-copy-btn'));
+    await waitFor(() => {
+      expect(navigator.clipboard.writeText).toHaveBeenCalledWith('可复制内容');
+    });
+  });
+
+  it('代码块显示复制按钮并复制代码', async () => {
+    render(
+      <AssistantMessageView
+        message={makeMessage({ content: "```js\nconsole.log('hi')\n```" })}
+      />,
+    );
+    fireEvent.click(screen.getByTestId('code-copy-btn'));
+    await waitFor(() => {
+      expect(navigator.clipboard.writeText).toHaveBeenCalledWith("console.log('hi')");
+    });
+  });
+
+  it('流式中不显示消息复制按钮', () => {
+    render(
+      <AssistantMessageView message={makeMessage({ content: 'streaming', isStreaming: true })} />,
+    );
+    expect(screen.queryByTestId('message-copy-btn')).toBeNull();
   });
 });

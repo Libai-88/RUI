@@ -15,6 +15,11 @@ export function MessageInput({
   const canSend = text.trim().length > 0;
 
   function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key === 'Escape' && isStreaming) {
+      e.preventDefault();
+      onCancel();
+      return;
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();

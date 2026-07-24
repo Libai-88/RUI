@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import { ToolInvocationCard } from './ToolInvocationCard';
 import type { ToolMessage, ToolInvocationStatus } from '../../product/types';
 
@@ -91,5 +91,51 @@ describe('ToolInvocationCard', () => {
 
     rerender(<ToolInvocationCard message={makeMessage({ status: 'failed' })} />);
     expect(screen.getByTestId('tool-card').style.borderLeft).toBe(`4px solid ${STATUS_RGB.failed}`);
+  });
+
+  it('失败结果显示错误标签和红色结果区', () => {
+    render(
+      <ToolInvocationCard
+        message={makeMessage({
+          status: 'failed',
+          result: { content: '权限不足', isError: true },
+        })}
+      />,
+    );
+    expect(screen.getByTestId('result-label')).toHaveTextContent('错误');
+    expect(screen.getByTestId('tool-result')).toHaveTextContent('权限不足');
+    expect(screen.getByTestId('tool-result').style.color).toBe('rgb(197, 48, 48)');
+    expect(screen.getByTestId('status-icon')).toHaveTextContent('✕');
+  });
+
+  it('长结果可展开收起', () => {
+    const long = 'x'.repeat(200);
+    render(
+      <ToolInvocationCard
+        message={makeMessage({
+          status: 'completed',
+          result: { content: long, isError: false },
+        })}
+      />,
+    );
+    const toggle = screen.getByTestId('result-toggle');
+    expect(toggle).toHaveTextContent('展开');
+    expect(screen.getByTestId('tool-result').style.maxHeight).toBe('80px');
+
+    fireEvent.click(toggle);
+    expect(screen.getByTestId('result-toggle')).toHaveTextContent('收起');
+    expect(screen.getByTestId('tool-result').style.maxHeight).toBe('none');
+  });
+
+  it('短结果不显示展开按钮', () => {
+    render(
+      <ToolInvocationCard
+        message={makeMessage({
+          status: 'completed',
+          result: { content: '短结果', isError: false },
+        })}
+      />,
+    );
+    expect(screen.queryByTestId('result-toggle')).toBeNull();
   });
 });

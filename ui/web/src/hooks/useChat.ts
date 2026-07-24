@@ -40,7 +40,13 @@ export function useChat(
         setMessages((prev) => finalizeMessage(prev, event.messageId));
         setStatus('idle');
       } else if (event.type === 'session-cancelled') {
-        setStatus('cancelled');
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.role === 'assistant' && m.isStreaming ? { ...m, isStreaming: false } : m,
+          ),
+        );
+        // 取消后状态收敛为 idle，允许用户继续发送
+        setStatus('idle');
       } else if (event.type === 'session-error') {
         setStatus('error');
       } else if (event.type === 'connection-interrupted') {

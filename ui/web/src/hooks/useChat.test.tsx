@@ -434,4 +434,48 @@ describe('useChat', () => {
 
     expect(result.current.messages.length).toBe(0);
   });
+
+  it('cancel 调用 adapter.cancelSession', async () => {
+    const { adapter } = createFakeAdapter();
+    const { result } = renderHook(() => useChat(adapter, 'sess-1'));
+
+    await act(async () => {
+      await result.current.sendMessage('你好');
+    });
+    await act(async () => {
+      await result.current.cancel();
+    });
+
+    expect(adapter.cancelSession).toHaveBeenCalledWith('sess-1');
+  });
+
+  it('session-cancelled 后状态收敛为 idle 并停止流式', async () => {
+    const { adapter, emit } = createFakeAdapter();
+    const { result } = renderHook(() => useChat(adapter, 'sess-1'));
+
+    await act(async () => {
+      await result.current.sendMessage('你好');
+    });
+
+    act(() => {
+      emit({
+        type: 'message-chunk',
+        sessionId: 'sess-1',
+        messageId: 'msg-assistant',
+        delta: 'partial',
+      });
+    });
+
+    act(() => {
+      emit({ type: 'session-cancelled', sessionId: 'sess-1' });
+    });
+
+    expect(result.current.status).toBe('idle');
+    const assistant = result.current.messages.find((m) => m.role === 'assistant');
+    expect(assistant).toBeDefined();
+    if (assistant?.role === 'assistant') {
+      expect(assistant.isStreaming).toBe(false);
+      expect(assistant.content).toBe('partial');
+    }
+  });
 });
