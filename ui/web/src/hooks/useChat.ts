@@ -49,6 +49,7 @@ export function useChat(
         setMessages((prev) => accumulateChunk(prev, event));
       } else if (event.type === 'message-complete') {
         setMessages((prev) => finalizeMessage(prev, event.messageId));
+        setMessages((prev) => finalizeThought(prev, `thought-${sessionId}`));
         setStatus('idle');
       } else if (event.type === 'session-cancelled') {
         setMessages((prev) =>
@@ -56,12 +57,13 @@ export function useChat(
             m.role === 'assistant' && m.isStreaming ? { ...m, isStreaming: false } : m,
           ),
         );
-        // 取消后状态收敛为 idle，允许用户继续发送
+        setMessages((prev) => finalizeThought(prev, `thought-${sessionId}`));
         setStatus('idle');
       } else if (event.type === 'session-error') {
         setStatus('error');
       } else if (event.type === 'connection-interrupted') {
         setMessages((prev) => markInterrupted(prev, event.messageId));
+        setMessages((prev) => finalizeThought(prev, `thought-${sessionId}`));
         setStatus('interrupted');
       } else if (event.type === 'tool-call-started') {
         const toolMessage: Message = {
