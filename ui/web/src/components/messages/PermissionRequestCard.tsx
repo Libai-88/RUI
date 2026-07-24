@@ -77,13 +77,12 @@ const denyBtnStyle: React.CSSProperties = {
   border: '1px solid #e53e3e',
 };
 
-/**
- * 消息流中的权限请求卡片。
- *
- * 展示工具名和操作说明，用户可选择允许或拒绝。
- * 保留 once/always 策略扩展位：onRespond 的 scope 参数
- * 目前 UI 只暴露"本次"决策，后续可加"始终允许/始终拒绝"按钮。
- */
+const alwaysBtnStyle: React.CSSProperties = {
+  ...btnBaseStyle,
+  background: '#2b6cb0',
+  color: '#fff',
+};
+
 export function PermissionRequestCard({
   message,
   onRespond,
@@ -122,11 +121,27 @@ export function PermissionRequestCard({
             </button>
             <button
               type="button"
+              style={alwaysBtnStyle}
+              onClick={() => onRespond(request.id, true, 'always')}
+              data-testid="permission-allow-always-btn"
+            >
+              始终允许
+            </button>
+            <button
+              type="button"
               style={denyBtnStyle}
               onClick={() => onRespond(request.id, false, 'once')}
               data-testid="permission-deny-btn"
             >
               拒绝
+            </button>
+            <button
+              type="button"
+              style={{ ...denyBtnStyle, color: '#c53030', borderColor: '#c53030' }}
+              onClick={() => onRespond(request.id, false, 'always')}
+              data-testid="permission-deny-always-btn"
+            >
+              始终拒绝
             </button>
           </div>
         )}

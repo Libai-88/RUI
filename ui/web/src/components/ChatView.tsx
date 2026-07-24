@@ -283,10 +283,24 @@ function PendingPermissionsPanel({
             </button>
             <button
               type="button"
+              onClick={() => onRespond(request.id, true, 'always')}
+              style={{ ...permissionActionBtnStyle, background: '#2b6cb0', color: '#fff' }}
+            >
+              始终允许
+            </button>
+            <button
+              type="button"
               onClick={() => onRespond(request.id, false, 'once')}
               style={{ ...permissionActionBtnStyle, background: '#fff', color: '#e53e3e', border: '1px solid #e53e3e' }}
             >
               拒绝
+            </button>
+            <button
+              type="button"
+              onClick={() => onRespond(request.id, false, 'always')}
+              style={{ ...permissionActionBtnStyle, background: '#fff', color: '#c53030', border: '1px solid #c53030' }}
+            >
+              始终拒绝
             </button>
           </div>
         </div>
