@@ -387,6 +387,17 @@ export class WebAcpAdapter implements AcpAdapter {
       });
       return;
     }
+    if (update.sessionUpdate === 'agent_thought_chunk') {
+      if (!update.content || update.content.type !== 'text') return;
+      const thoughtMessageId = `thought-${sessionId}`;
+      this.emit({
+        type: 'thought-chunk',
+        sessionId,
+        messageId: thoughtMessageId,
+        delta: update.content.text,
+      });
+      return;
+    }
     if (update.sessionUpdate === 'tool_call') {
       const toolCallId = update.toolCallId || generateId('tool');
       const toolName = update.title || '未知工具';

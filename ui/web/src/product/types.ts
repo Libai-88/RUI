@@ -70,7 +70,8 @@ export type Message =
   | SystemMessage
   | ToolMessage
   | PermissionMessage
-  | ErrorMessage;
+  | ErrorMessage
+  | ThoughtMessage;
 
 /** 用户消息 */
 export interface UserMessage {
@@ -119,6 +120,15 @@ export interface ErrorMessage {
   role: 'error';
   content: string;
   code?: string;
+  createdAt: string;
+}
+
+/** 思考消息（agent_thought_chunk 流式累积） */
+export interface ThoughtMessage {
+  id: MessageId;
+  role: 'thought';
+  content: string;
+  isStreaming: boolean;
   createdAt: string;
 }
 
@@ -203,7 +213,9 @@ export type AdapterEvent =
   | { type: 'permission-resolved'; sessionId: SessionId; requestId: PermissionRequestId; allowed: boolean }
   | { type: 'session-error'; sessionId: SessionId; message: string; code?: string }
   | { type: 'session-cancelled'; sessionId: SessionId }
-  | { type: 'connection-interrupted'; sessionId: SessionId; messageId: MessageId | null };
+  | { type: 'connection-interrupted'; sessionId: SessionId; messageId: MessageId | null }
+  | { type: 'thought-chunk'; sessionId: SessionId; messageId: MessageId; delta: string }
+  | { type: 'thought-complete'; sessionId: SessionId; messageId: MessageId };
 
 /**
  * ACP adapter 接口契约。

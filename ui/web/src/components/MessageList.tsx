@@ -6,6 +6,7 @@ import { SystemMessageView } from './messages/SystemMessageView';
 import { ErrorMessageView } from './messages/ErrorMessageView';
 import { ToolInvocationCard } from './messages/ToolInvocationCard';
 import { PermissionRequestCard } from './messages/PermissionRequestCard';
+import { ThoughtMessageView } from './messages/ThoughtMessageView';
 
 const NEAR_BOTTOM_PX = 48;
 
@@ -105,6 +106,8 @@ function MessageBubble({
           }
         />
       );
+    case 'thought':
+      return <ThoughtMessageView message={message} />;
     default:
       return null;
   }

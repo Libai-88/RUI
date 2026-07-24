@@ -7,7 +7,7 @@ import type {
   SessionId,
   SessionStatus,
 } from '../product/types';
-import { accumulateChunk, finalizeMessage, markInterrupted } from '../chat/messageAccumulator';
+import { accumulateChunk, finalizeMessage, markInterrupted, accumulateThoughtChunk, finalizeThought } from '../chat/messageAccumulator';
 
 function generateId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -113,6 +113,10 @@ export function useChat(
         );
         // 权限决议后，若当前正处于等待权限状态，恢复为 streaming（agent 会继续该轮响应）
         setStatus((prev) => (prev === 'waiting-for-permission' ? 'streaming' : prev));
+      } else if (event.type === 'thought-chunk') {
+        setMessages((prev) => accumulateThoughtChunk(prev, event));
+      } else if (event.type === 'thought-complete') {
+        setMessages((prev) => finalizeThought(prev, event.messageId));
       }
     });
   }, [adapter, sessionId]);
