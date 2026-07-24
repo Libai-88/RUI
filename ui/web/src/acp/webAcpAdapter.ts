@@ -90,19 +90,32 @@ export type AcpClientFactory = (
   callbacks: AcpClientCallbacks,
 ) => AcpClient;
 
+/** 单个 Session 的活跃 prompt 上下文 */
+interface SessionMessageContext {
+  messageId: string;
+  /** 每次 sendMessage 生成的唯一 promptAttemptId，用于识别过期尝试 */
+  promptAttemptId: string;
+}
+
 /**
  * Web 端 ACP 适配器
  *
  * 通过注入的客户端工厂连接到 goose serve，
  * 将 ACP 通知转换为 RUI 产品层事件。
+ *
+ * 每个 Session 维护独立的消息上下文（messageId / promptAttemptId）和
+ * pending permission 集合，确保多 Session 并发时 stale prompt attempt
+ * 不会覆盖其它 Session 的状态。
  */
 export class WebAcpAdapter implements AcpAdapter {
   private client: AcpClient | null = null;
   private listeners: Set<(event: AdapterEvent) => void> = new Set();
   private stateManager = new ConnectionStateManager();
   private config: AcpConnectionConfig | null = null;
-  private currentMessageId: string | null = null;
-  private currentSessionId: SessionId | null = null;
+  /** Per-session 活跃 prompt 上下文，key 为 sessionId */
+  private sessionMessageContext: Map<SessionId, SessionMessageContext> = new Map();
+  /** Per-session pending permission 请求 ID 集合 */
+  private pendingPermissions: Map<SessionId, Set<PermissionRequestId>> = new Map();
 
   constructor(private clientFactory: AcpClientFactory) {}
 
@@ -133,6 +146,8 @@ export class WebAcpAdapter implements AcpAdapter {
   async disconnect(): Promise<void> {
     this.client = null;
     this.config = null;
+    this.sessionMessageContext.clear();
+    this.pendingPermissions.clear();
     this.stateManager.reset();
     this.emit({ type: 'connection-state-changed', state: this.stateManager.getState() });
   }
@@ -204,8 +219,9 @@ export class WebAcpAdapter implements AcpAdapter {
   async sendMessage(sessionId: SessionId, content: string): Promise<MessageId> {
     if (!this.client) throw new Error('ACP 未连接');
     const messageId = generateId('msg');
-    this.currentMessageId = messageId;
-    this.currentSessionId = sessionId;
+    const promptAttemptId = generateId('prompt');
+    // 每个 Session 维护独立的上下文，避免并发 sendMessage 互相覆盖
+    this.sessionMessageContext.set(sessionId, { messageId, promptAttemptId });
     this.stateManager.tryTransition(states.processing());
     try {
       await this.client.sessionPrompt({
@@ -214,8 +230,12 @@ export class WebAcpAdapter implements AcpAdapter {
       });
       this.emit({ type: 'message-complete', sessionId, messageId });
     } finally {
-      this.currentMessageId = null;
-      this.currentSessionId = null;
+      // 仅当当前上下文仍是本次 attempt 时才清理，
+      // 防止清理掉后续新 sendMessage 建立的上下文
+      const ctx = this.sessionMessageContext.get(sessionId);
+      if (ctx?.promptAttemptId === promptAttemptId) {
+        this.sessionMessageContext.delete(sessionId);
+      }
       this.stateManager.tryTransition(states.connected());
     }
     return messageId;
@@ -225,6 +245,8 @@ export class WebAcpAdapter implements AcpAdapter {
     if (!this.client) throw new Error('ACP 未连接');
 
     await this.client.sessionCancel({ sessionId });
+    this.sessionMessageContext.delete(sessionId);
+    this.pendingPermissions.delete(sessionId);
     this.emit({ type: 'session-cancelled', sessionId });
     this.stateManager.tryTransition(states.connected());
   }
@@ -249,6 +271,13 @@ export class WebAcpAdapter implements AcpAdapter {
       },
     });
 
+    // 从该 Session 的 pending 集合中移除
+    const pending = this.pendingPermissions.get(sessionId);
+    if (pending) {
+      pending.delete(requestId);
+      if (pending.size === 0) this.pendingPermissions.delete(sessionId);
+    }
+
     this.emit({
       type: 'permission-resolved',
       sessionId,
@@ -262,11 +291,13 @@ export class WebAcpAdapter implements AcpAdapter {
     const { update, sessionId } = notification;
     if (update.sessionUpdate === 'agent_message_chunk') {
       if (!update.content || update.content.type !== 'text') return;
-      if (!this.currentMessageId) return;
+      // 使用 per-session 上下文中的 messageId，避免 stale chunk 归到错误 session
+      const ctx = this.sessionMessageContext.get(sessionId);
+      if (!ctx) return; // 该 Session 无活跃 prompt，丢弃 stale chunk
       this.emit({
         type: 'message-chunk',
         sessionId,
-        messageId: this.currentMessageId,
+        messageId: ctx.messageId,
         delta: update.content.text,
       });
       return;
@@ -325,17 +356,18 @@ export class WebAcpAdapter implements AcpAdapter {
     return '';
   }
 
-  /** 处理连接断开：发射 connection-interrupted 事件并切换状态 */
+  /** 处理连接断开：为所有活跃 Session 发射 connection-interrupted 事件并切换状态 */
   private handleDisconnect(_reason?: string): void {
-    if (this.currentMessageId && this.currentSessionId) {
+    // 每个 Session 的活跃 prompt 都需要被标记为中断
+    for (const [sessionId, ctx] of this.sessionMessageContext) {
       this.emit({
         type: 'connection-interrupted',
-        sessionId: this.currentSessionId,
-        messageId: this.currentMessageId,
+        sessionId,
+        messageId: ctx.messageId,
       });
     }
-    this.currentMessageId = null;
-    this.currentSessionId = null;
+    this.sessionMessageContext.clear();
+    this.pendingPermissions.clear();
     this.stateManager.tryTransition(states.disconnected());
     this.emit({ type: 'connection-state-changed', state: this.stateManager.getState() });
   }
@@ -388,5 +420,26 @@ export class WebAcpAdapter implements AcpAdapter {
   /** 获取当前连接状态 */
   getConnectionState(): ConnectionState {
     return this.stateManager.getState();
+  }
+
+  /** 检查指定 Session 是否有活跃的 prompt attempt */
+  hasActivePrompt(sessionId: SessionId): boolean {
+    return this.sessionMessageContext.has(sessionId);
+  }
+
+  /** 获取指定 Session 的 pending permission 请求 ID 列表 */
+  getPendingPermissionIds(sessionId: SessionId): PermissionRequestId[] {
+    const set = this.pendingPermissions.get(sessionId);
+    return set ? Array.from(set) : [];
+  }
+
+  /** 记录指定 Session 的 pending permission 请求（供 permission 流程使用） */
+  registerPendingPermission(sessionId: SessionId, requestId: PermissionRequestId): void {
+    let set = this.pendingPermissions.get(sessionId);
+    if (!set) {
+      set = new Set();
+      this.pendingPermissions.set(sessionId, set);
+    }
+    set.add(requestId);
   }
 }

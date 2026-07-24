@@ -669,4 +669,297 @@ describe('WebAcpAdapter', () => {
       expect(started.invocation.argumentsSummary.length).toBe(200);
     }
   });
+
+  // -------------------------------------------------------------------------
+  // #11 Session 切换与状态隔离 - 多 Session 并发场景
+  // -------------------------------------------------------------------------
+
+  it('多 Session 并发流式：各 Session 的 chunk 使用各自的 messageId', async () => {
+    const events: AdapterEvent[] = [];
+    let capturedCallbacks: AcpClientCallbacks | null = null;
+    const streamingFactory: AcpClientFactory = (_url, callbacks) => {
+      capturedCallbacks = callbacks;
+      return mockClient;
+    };
+    const streamAdapter = new WebAcpAdapter(streamingFactory);
+    streamAdapter.subscribe((e) => events.push(e));
+    await streamAdapter.connect({ endpoint: 'http://127.0.0.1:3000', workspace: '/tmp' });
+
+    // 每个 session 的 prompt 独立 resolve
+    const resolvers: Record<string, () => void> = {};
+    mockClient.sessionPrompt = vi.fn(
+      (params: { sessionId: string }) =>
+        new Promise<void>((r) => { resolvers[params.sessionId] = r; }),
+    );
+
+    // 两个 session 同时发送消息（均未 resolve）
+    const sendA = streamAdapter.sendMessage('session-A', '你好A');
+    const sendB = streamAdapter.sendMessage('session-B', '你好B');
+
+    // 交叉到达的 chunk
+    capturedCallbacks!.onSessionUpdate!({
+      sessionId: 'session-A',
+      update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'A1' } },
+    });
+    capturedCallbacks!.onSessionUpdate!({
+      sessionId: 'session-B',
+      update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'B1' } },
+    });
+    capturedCallbacks!.onSessionUpdate!({
+      sessionId: 'session-A',
+      update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'A2' } },
+    });
+
+    // 完成
+    resolvers['session-A']!();
+    await sendA;
+    resolvers['session-B']!();
+    await sendB;
+
+    const aChunks = events.filter(
+      (e) => e.type === 'message-chunk' && e.sessionId === 'session-A',
+    );
+    const bChunks = events.filter(
+      (e) => e.type === 'message-chunk' && e.sessionId === 'session-B',
+    );
+
+    // A 收到 2 个 chunk，B 收到 1 个 chunk
+    expect(aChunks.length).toBe(2);
+    expect(bChunks.length).toBe(1);
+    // A 的两个 chunk 必须使用同一个 messageId
+    if (aChunks[0].type === 'message-chunk' && aChunks[1].type === 'message-chunk') {
+      expect(aChunks[0].messageId).toBe(aChunks[1].messageId);
+      expect(aChunks[0].delta).toBe('A1');
+      expect(aChunks[1].delta).toBe('A2');
+    }
+    // B 的 chunk 必须使用与 A 不同的 messageId
+    if (bChunks[0].type === 'message-chunk' && aChunks[0].type === 'message-chunk') {
+      expect(bChunks[0].messageId).not.toBe(aChunks[0].messageId);
+      expect(bChunks[0].delta).toBe('B1');
+    }
+  });
+
+  it('stale chunk：Session prompt 完成后到达的 chunk 被丢弃', async () => {
+    const events: AdapterEvent[] = [];
+    let capturedCallbacks: AcpClientCallbacks | null = null;
+    const streamingFactory: AcpClientFactory = (_url, callbacks) => {
+      capturedCallbacks = callbacks;
+      return mockClient;
+    };
+    const streamAdapter = new WebAcpAdapter(streamingFactory);
+    streamAdapter.subscribe((e) => events.push(e));
+    await streamAdapter.connect({ endpoint: 'http://127.0.0.1:3000', workspace: '/tmp' });
+
+    let resolvePrompt!: () => void;
+    mockClient.sessionPrompt = vi.fn(
+      () => new Promise<void>((r) => { resolvePrompt = r; }),
+    );
+
+    const sendPromise = streamAdapter.sendMessage('session-A', '你好');
+    // prompt 完成前 chunk 正常发射
+    capturedCallbacks!.onSessionUpdate!({
+      sessionId: 'session-A',
+      update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: '正常' } },
+    });
+
+    resolvePrompt();
+    await sendPromise;
+
+    // prompt 完成后到达的 stale chunk 应被丢弃（context 已清理）
+    capturedCallbacks!.onSessionUpdate!({
+      sessionId: 'session-A',
+      update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: '过期' } },
+    });
+
+    const chunks = events.filter((e) => e.type === 'message-chunk');
+    expect(chunks.length).toBe(1);
+    if (chunks[0].type === 'message-chunk') {
+      expect(chunks[0].delta).toBe('正常');
+    }
+  });
+
+  it('stale prompt attempt 不覆盖新 Session 状态：同一 session 重新发送后旧 attempt 的 chunk 归到新 messageId', async () => {
+    const events: AdapterEvent[] = [];
+    let capturedCallbacks: AcpClientCallbacks | null = null;
+    const streamingFactory: AcpClientFactory = (_url, callbacks) => {
+      capturedCallbacks = callbacks;
+      return mockClient;
+    };
+    const streamAdapter = new WebAcpAdapter(streamingFactory);
+    streamAdapter.subscribe((e) => events.push(e));
+    await streamAdapter.connect({ endpoint: 'http://127.0.0.1:3000', workspace: '/tmp' });
+
+    const resolvers: (() => void)[] = [];
+    mockClient.sessionPrompt = vi.fn(
+      () => new Promise<void>((r) => { resolvers.push(r); }),
+    );
+
+    // 第一次发送（attempt 1），尚未 resolve
+    const send1 = streamAdapter.sendMessage('session-A', '第一次');
+
+    // 第二次发送（attempt 2），覆盖 context
+    const send2 = streamAdapter.sendMessage('session-A', '第二次');
+
+    // 此时 context 是 attempt 2 的，chunk 应归到 attempt 2 的 messageId
+    capturedCallbacks!.onSessionUpdate!({
+      sessionId: 'session-A',
+      update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'chunk' } },
+    });
+
+    // 完成（按入队顺序 resolve）
+    resolvers[0]!();
+    await send1;
+    resolvers[1]!();
+    const msgId2 = await send2;
+
+    const chunks = events.filter((e) => e.type === 'message-chunk');
+    expect(chunks.length).toBe(1);
+    if (chunks[0].type === 'message-chunk') {
+      // chunk 必须归到 attempt 2 的 messageId
+      expect(chunks[0].messageId).toBe(msgId2);
+    }
+  });
+
+  it('多 Session 断线：所有活跃 Session 均收到 connection-interrupted', async () => {
+    const events: AdapterEvent[] = [];
+    let capturedCallbacks: AcpClientCallbacks | null = null;
+    const discFactory: AcpClientFactory = (_url, callbacks) => {
+      capturedCallbacks = callbacks;
+      return mockClient;
+    };
+    const discAdapter = new WebAcpAdapter(discFactory);
+    discAdapter.subscribe((e) => events.push(e));
+    await discAdapter.connect({ endpoint: 'http://127.0.0.1:3000', workspace: '/tmp' });
+
+    const resolvers: Record<string, () => void> = {};
+    mockClient.sessionPrompt = vi.fn(
+      (params: { sessionId: string }) =>
+        new Promise<void>((r) => { resolvers[params.sessionId] = r; }),
+    );
+
+    // 两个 session 同时活跃
+    const sendA = discAdapter.sendMessage('session-A', 'helloA');
+    const sendB = discAdapter.sendMessage('session-B', 'helloB');
+
+    // 断线
+    capturedCallbacks!.onDisconnect!('connection lost');
+
+    const interrupted = events.filter((e) => e.type === 'connection-interrupted');
+    expect(interrupted.length).toBe(2);
+    const sessionIds = interrupted.map((e) => (e as { sessionId: string }).sessionId).sort();
+    expect(sessionIds).toEqual(['session-A', 'session-B']);
+
+    resolvers['session-A']!();
+    resolvers['session-B']!();
+    await sendA;
+    await sendB;
+  });
+
+  it('cancelSession 清理上下文：后续 chunk 被丢弃', async () => {
+    const events: AdapterEvent[] = [];
+    let capturedCallbacks: AcpClientCallbacks | null = null;
+    const streamingFactory: AcpClientFactory = (_url, callbacks) => {
+      capturedCallbacks = callbacks;
+      return mockClient;
+    };
+    const streamAdapter = new WebAcpAdapter(streamingFactory);
+    streamAdapter.subscribe((e) => events.push(e));
+    await streamAdapter.connect({ endpoint: 'http://127.0.0.1:3000', workspace: '/tmp' });
+
+    let resolvePrompt!: () => void;
+    mockClient.sessionPrompt = vi.fn(
+      () => new Promise<void>((r) => { resolvePrompt = r; }),
+    );
+
+    const sendPromise = streamAdapter.sendMessage('session-A', '你好');
+    expect(streamAdapter.hasActivePrompt('session-A')).toBe(true);
+
+    await streamAdapter.cancelSession('session-A');
+    expect(streamAdapter.hasActivePrompt('session-A')).toBe(false);
+
+    // cancel 后 chunk 应被丢弃
+    capturedCallbacks!.onSessionUpdate!({
+      sessionId: 'session-A',
+      update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: '过期' } },
+    });
+
+    resolvePrompt();
+    await sendPromise;
+
+    const chunks = events.filter((e) => e.type === 'message-chunk');
+    expect(chunks.length).toBe(0);
+  });
+
+  it('hasActivePrompt 在 sendMessage 期间为 true，完成后为 false', async () => {
+    await adapter.connect({ endpoint: 'http://127.0.0.1:3000', workspace: '/tmp' });
+
+    let resolvePrompt!: () => void;
+    mockClient.sessionPrompt = vi.fn(
+      () => new Promise<void>((r) => { resolvePrompt = r; }),
+    );
+
+    expect(adapter.hasActivePrompt('s1')).toBe(false);
+    const sendPromise = adapter.sendMessage('s1', '你好');
+    expect(adapter.hasActivePrompt('s1')).toBe(true);
+
+    resolvePrompt();
+    await sendPromise;
+    expect(adapter.hasActivePrompt('s1')).toBe(false);
+  });
+
+  it('pendingPermissions 按 Session 隔离：register/get/respond 清理互不影响', async () => {
+    await adapter.connect({ endpoint: 'http://127.0.0.1:3000', workspace: '/tmp' });
+
+    adapter.registerPendingPermission('session-A', 'perm-1');
+    adapter.registerPendingPermission('session-A', 'perm-2');
+    adapter.registerPendingPermission('session-B', 'perm-3');
+
+    expect(adapter.getPendingPermissionIds('session-A').sort()).toEqual(['perm-1', 'perm-2']);
+    expect(adapter.getPendingPermissionIds('session-B')).toEqual(['perm-3']);
+
+    // session-A 的 perm-1 被响应后从 pending 移除
+    await adapter.respondToPermission('session-A', 'perm-1', true);
+    expect(adapter.getPendingPermissionIds('session-A')).toEqual(['perm-2']);
+    // session-B 不受影响
+    expect(adapter.getPendingPermissionIds('session-B')).toEqual(['perm-3']);
+
+    // session-A 最后一个 permission 被响应后集合清空
+    await adapter.respondToPermission('session-A', 'perm-2', false);
+    expect(adapter.getPendingPermissionIds('session-A')).toEqual([]);
+    expect(adapter.getPendingPermissionIds('session-B')).toEqual(['perm-3']);
+  });
+
+  it('cancelSession 清理该 Session 的 pending permissions', async () => {
+    await adapter.connect({ endpoint: 'http://127.0.0.1:3000', workspace: '/tmp' });
+
+    adapter.registerPendingPermission('session-A', 'perm-1');
+    adapter.registerPendingPermission('session-B', 'perm-2');
+
+    await adapter.cancelSession('session-A');
+
+    expect(adapter.getPendingPermissionIds('session-A')).toEqual([]);
+    expect(adapter.getPendingPermissionIds('session-B')).toEqual(['perm-2']);
+  });
+
+  it('disconnect 清理所有 Session 的上下文和 pending permissions', async () => {
+    await adapter.connect({ endpoint: 'http://127.0.0.1:3000', workspace: '/tmp' });
+
+    let resolvePrompt!: () => void;
+    mockClient.sessionPrompt = vi.fn(
+      () => new Promise<void>((r) => { resolvePrompt = r; }),
+    );
+
+    const sendPromise = adapter.sendMessage('session-A', '你好');
+    adapter.registerPendingPermission('session-A', 'perm-1');
+    adapter.registerPendingPermission('session-B', 'perm-2');
+
+    await adapter.disconnect();
+
+    expect(adapter.hasActivePrompt('session-A')).toBe(false);
+    expect(adapter.getPendingPermissionIds('session-A')).toEqual([]);
+    expect(adapter.getPendingPermissionIds('session-B')).toEqual([]);
+
+    resolvePrompt();
+    await sendPromise.catch(() => {});
+  });
 });
