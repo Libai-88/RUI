@@ -153,6 +153,7 @@ describe('RUI 产品层类型边界', () => {
       description: '关于项目初始化的讨论',
       createdAt: '2025-01-01T00:00:00Z',
       updatedAt: '2025-01-01T00:10:00Z',
+      status: 'idle',
     };
 
     expect(summary.title).toBe('测试会话');

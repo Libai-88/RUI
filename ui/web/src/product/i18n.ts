@@ -62,7 +62,6 @@ const zh: Messages = {
 
   // 断线恢复
   'chat.recovery.title': '连接已中断，已接收内容已保留',
-  'chat.recovery.continue': '从断点继续',
   'chat.recovery.reconnect': '重连',
   'chat.recovery.resend': '重新发送',
 
@@ -136,7 +135,6 @@ const en: Messages = {
   'chat.retry': 'Retry',
 
   'chat.recovery.title': 'Connection interrupted, received content preserved',
-  'chat.recovery.continue': 'Continue from breakpoint',
   'chat.recovery.reconnect': 'Reconnect',
   'chat.recovery.resend': 'Resend',
 

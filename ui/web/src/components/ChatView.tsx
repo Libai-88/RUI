@@ -182,13 +182,6 @@ function ChatSession({
           <div style={{ display: 'flex', gap: 8 }}>
             <button
               type="button"
-              onClick={continueFromBreakpoint}
-              style={continueFromBreakpointBtnStyle}
-            >
-              {t('chat.recovery.continue')}
-            </button>
-            <button
-              type="button"
               onClick={reconnect}
               disabled={!adapter.reconnect}
               style={reconnectBtnStyle}
