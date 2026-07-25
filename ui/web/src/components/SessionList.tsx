@@ -1,4 +1,4 @@
-import type { SessionSummary, SessionId } from '../product/types';
+import type { SessionSummary, SessionId, SessionStatus } from '../product/types';
 
 function formatDate(iso: string): string {
   if (!iso) return '';
@@ -6,6 +6,27 @@ function formatDate(iso: string): string {
   if (Number.isNaN(d.getTime())) return '';
   return d.toLocaleDateString();
 }
+
+function StatusBadge({ status }: { status: SessionStatus }) {
+  const { label, style } = statusConfig[status] ?? statusConfig.idle;
+  return <span style={{ ...statusBadgeBaseStyle, ...style }}>{label}</span>;
+}
+
+const statusBadgeBaseStyle: React.CSSProperties = {
+  fontSize: 10,
+  padding: '1px 6px',
+  borderRadius: 4,
+  fontWeight: 500,
+};
+
+const statusConfig: Record<SessionStatus, { label: string; style: React.CSSProperties }> = {
+  idle: { label: '空闲', style: { background: '#e5e7eb', color: '#4b5563' } },
+  streaming: { label: '生成中', style: { background: '#dbeafe', color: '#1e40af' } },
+  'waiting-for-permission': { label: '待权限', style: { background: '#fef3c7', color: '#92400e' } },
+  cancelled: { label: '已取消', style: { background: '#f3f4f6', color: '#6b7280' } },
+  error: { label: '错误', style: { background: '#fee2e2', color: '#991b1b' } },
+  interrupted: { label: '已中断', style: { background: '#fef3c7', color: '#b45309' } },
+};
 
 export function SessionList({
   sessions,
@@ -73,7 +94,10 @@ export function SessionList({
                 {s.description && <div style={descStyle}>{s.description}</div>}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <span style={dateStyle}>{formatDate(s.updatedAt)}</span>
-                  {isLoading && <span style={loadingTextStyle}>加载中…</span>}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <StatusBadge status={s.status} />
+                    {isLoading && <span style={loadingTextStyle}>加载中…</span>}
+                  </div>
                 </div>
               </div>
             );

@@ -8,6 +8,7 @@ function makeSession(id: string, title: string = id): SessionSummary {
     id,
     title,
     description: '',
+    status: 'idle',
     createdAt: '',
     updatedAt: '',
   };

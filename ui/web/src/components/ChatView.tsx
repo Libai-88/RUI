@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { AcpAdapter, PermissionRequest, Workspace, SessionId } from '../product/types';
+import type { AcpAdapter, Workspace, SessionId, PermissionRequest } from '../product/types';
 import { useChat } from '../hooks/useChat';
 import { MessageList } from './MessageList';
 import { MessageInput } from './MessageInput';
@@ -9,11 +9,13 @@ export function ChatView({
   workspace,
   sessionId: providedSessionId,
   onSessionCreated,
+  onPendingPermissionsChange,
 }: {
   adapter: AcpAdapter;
   workspace: Workspace;
   sessionId?: SessionId | null;
   onSessionCreated?: (sessionId: SessionId) => void;
+  onPendingPermissionsChange?: (pendingPermissions: PermissionRequest[], resolvePermission: (requestId: string, allowed: boolean, scope?: 'once' | 'always') => Promise<void>) => void;
 }) {
   const [sessionId, setSessionId] = useState<SessionId | null>(providedSessionId ?? null);
   const [error, setError] = useState<string | null>(null);
@@ -117,7 +119,7 @@ export function ChatView({
   if (!sessionId) return null;
 
   return (
-    <ChatSession key={sessionId} adapter={adapter} sessionId={sessionId} workspace={workspace} />
+    <ChatSession key={sessionId} adapter={adapter} sessionId={sessionId} workspace={workspace} onPendingPermissionsChange={onPendingPermissionsChange} />
   );
 }
 
@@ -125,10 +127,12 @@ function ChatSession({
   adapter,
   sessionId,
   workspace,
+  onPendingPermissionsChange,
 }: {
   adapter: AcpAdapter;
   sessionId: SessionId;
   workspace: Workspace;
+  onPendingPermissionsChange?: (pendingPermissions: PermissionRequest[], resolvePermission: (requestId: string, allowed: boolean, scope?: 'once' | 'always') => Promise<void>) => void;
 }) {
   const {
     messages,
@@ -140,6 +144,10 @@ function ChatSession({
     resolvePermission,
     pendingPermissions,
   } = useChat(adapter, sessionId);
+
+  useEffect(() => {
+    if (onPendingPermissionsChange) onPendingPermissionsChange(pendingPermissions, resolvePermission);
+  }, [pendingPermissions, resolvePermission, onPendingPermissionsChange]);
 
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
@@ -164,16 +172,20 @@ function ChatSession({
       >
         工作目录：{workspace.path}
       </div>
-      <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+      <div style={{ flex: 1, overflow: 'auto' }}>
         <MessageList messages={messages} onRespondPermission={resolvePermission} />
-        {pendingPermissions.length > 0 && (
-          <PendingPermissionsPanel pendingPermissions={pendingPermissions} onRespond={resolvePermission} />
-        )}
       </div>
       {status === 'interrupted' && (
         <div style={recoveryBarStyle}>
           <span style={{ fontSize: 13 }}>连接已中断，已接收内容已保留</span>
           <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              type="button"
+              onClick={continueFromBreakpoint}
+              style={continueFromBreakpointBtnStyle}
+            >
+              从断点继续
+            </button>
             <button
               type="button"
               onClick={reconnect}
@@ -226,93 +238,4 @@ const resendBtnStyle: React.CSSProperties = {
   color: '#fff',
   cursor: 'pointer',
   fontSize: 13,
-};
-
-/**
- * 上下文区待处理权限面板（最小实现）。
- *
- * 完整三栏布局属于 #17/#19，这里先提供一个附着在消息区右侧的
- * 待处理权限列表，满足"上下文区显示待处理权限请求"验收标准。
- */
-function PendingPermissionsPanel({
-  pendingPermissions,
-  onRespond,
-}: {
-  pendingPermissions: PermissionRequest[];
-  onRespond: (requestId: string, allowed: boolean, scope?: 'once' | 'always') => void;
-}) {
-  return (
-    <div
-      style={{
-        width: 220,
-        borderLeft: '1px solid #e5e7eb',
-        padding: '12px',
-        overflowY: 'auto',
-        fontSize: 13,
-      }}
-      data-testid="pending-permissions-panel"
-    >
-      <div style={{ fontWeight: 600, marginBottom: 8, color: '#92400e' }}>
-        待处理权限（{pendingPermissions.length}）
-      </div>
-      {pendingPermissions.map((request) => (
-        <div
-          key={request.id}
-          style={{
-            padding: '8px',
-            marginBottom: 8,
-            borderRadius: 6,
-            background: '#fffbeb',
-            border: '1px solid #fde68a',
-          }}
-          data-testid="pending-permission-item"
-        >
-          <div style={{ fontWeight: 600, marginBottom: 4 }}>{request.toolName}</div>
-          {request.description && (
-            <div style={{ color: '#666', marginBottom: 6, whiteSpace: 'pre-wrap' }}>
-              {request.description}
-            </div>
-          )}
-          <div style={{ display: 'flex', gap: 6 }}>
-            <button
-              type="button"
-              onClick={() => onRespond(request.id, true, 'once')}
-              style={{ ...permissionActionBtnStyle, background: '#38a169', color: '#fff' }}
-            >
-              允许
-            </button>
-            <button
-              type="button"
-              onClick={() => onRespond(request.id, true, 'always')}
-              style={{ ...permissionActionBtnStyle, background: '#2b6cb0', color: '#fff' }}
-            >
-              始终允许
-            </button>
-            <button
-              type="button"
-              onClick={() => onRespond(request.id, false, 'once')}
-              style={{ ...permissionActionBtnStyle, background: '#fff', color: '#e53e3e', border: '1px solid #e53e3e' }}
-            >
-              拒绝
-            </button>
-            <button
-              type="button"
-              onClick={() => onRespond(request.id, false, 'always')}
-              style={{ ...permissionActionBtnStyle, background: '#fff', color: '#c53030', border: '1px solid #c53030' }}
-            >
-              始终拒绝
-            </button>
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-const permissionActionBtnStyle: React.CSSProperties = {
-  border: 'none',
-  borderRadius: 4,
-  fontSize: 12,
-  padding: '3px 10px',
-  cursor: 'pointer',
 };

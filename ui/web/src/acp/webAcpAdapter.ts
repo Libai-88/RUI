@@ -242,6 +242,7 @@ export class WebAcpAdapter implements AcpAdapter {
       id: String(s.sessionId),
       title: s.title || '未命名会话',
       description: s._meta?.lastMessageSnippet || '',
+      status: 'idle',
       createdAt: s._meta?.createdAt || s.updatedAt || '',
       updatedAt: s.updatedAt || '',
     }));

@@ -31,6 +31,7 @@ export interface SessionSummary {
   id: SessionId;
   title: string;
   description: string;
+  status: SessionStatus;
   createdAt: string;
   updatedAt: string;
 }

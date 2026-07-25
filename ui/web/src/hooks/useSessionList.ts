@@ -1,5 +1,9 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import type { AcpAdapter, SessionSummary, SessionId } from '../product/types';
+import type { AcpAdapter, SessionSummary, SessionId, SessionStatus } from '../product/types';
+
+function updateSessionStatus(sessions: SessionSummary[], sessionId: SessionId, status: SessionStatus): SessionSummary[] {
+  return sessions.map((s) => (s.id === sessionId ? { ...s, status } : s));
+}
 
 export interface UseSessionListResult {
   sessions: SessionSummary[];
@@ -39,6 +43,27 @@ export function useSessionList(adapter: AcpAdapter | null): UseSessionListResult
           .listSessions()
           .then(setSessions)
           .catch(() => {});
+      }
+      if (event.type === 'message-chunk') {
+        setSessions((prev) => updateSessionStatus(prev, event.sessionId, 'streaming'));
+      }
+      if (event.type === 'message-complete') {
+        setSessions((prev) => updateSessionStatus(prev, event.sessionId, 'idle'));
+      }
+      if (event.type === 'permission-requested') {
+        setSessions((prev) => updateSessionStatus(prev, event.sessionId, 'waiting-for-permission'));
+      }
+      if (event.type === 'permission-resolved') {
+        setSessions((prev) => updateSessionStatus(prev, event.sessionId, 'streaming'));
+      }
+      if (event.type === 'session-cancelled') {
+        setSessions((prev) => updateSessionStatus(prev, event.sessionId, 'idle'));
+      }
+      if (event.type === 'session-error') {
+        setSessions((prev) => updateSessionStatus(prev, event.sessionId, 'error'));
+      }
+      if (event.type === 'connection-interrupted') {
+        setSessions((prev) => updateSessionStatus(prev, event.sessionId, 'interrupted'));
       }
     });
   }, [adapter]);

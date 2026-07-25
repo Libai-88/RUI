@@ -1,5 +1,5 @@
-import { useState, useEffect, useMemo } from 'react';
-import type { AcpConnectionConfig, SessionId } from './product/types';
+import { useState, useEffect, useMemo, useCallback } from 'react';
+import type { AcpConnectionConfig, SessionId, PermissionRequest } from './product/types';
 import { loadConnectionConfig, saveConnectionConfig } from './connection/connectionConfig';
 import { ConnectionWizard } from './components/ConnectionWizard';
 import { ChatView } from './components/ChatView';
@@ -8,6 +8,7 @@ import { useSessionList } from './hooks/useSessionList';
 import { WebAcpAdapter } from './acp/webAcpAdapter';
 import { createGooseClientFactory } from './acp/gooseClientFactory';
 import { ThreeColumnLayout } from './components/ThreeColumnLayout';
+import { ContextArea } from './components/ContextArea';
 
 type ConnectionState = 'connecting' | 'connected' | 'error';
 
@@ -71,6 +72,18 @@ function ConnectedApp({ config }: { config: AcpConnectionConfig }) {
     connectionState === 'connected' ? adapter : null,
   );
   const [forceNewSession, setForceNewSession] = useState(false);
+  const [pendingPermissions, setPendingPermissions] = useState<PermissionRequest[]>([]);
+  const [resolvePermission, setResolvePermission] = useState<(requestId: string, allowed: boolean, scope?: 'once' | 'always') => Promise<void>>(
+    async () => {},
+  );
+
+  const handlePendingPermissionsChange = useCallback(
+    (perms: PermissionRequest[], resolver: (requestId: string, allowed: boolean, scope?: 'once' | 'always') => Promise<void>) => {
+      setPendingPermissions(perms);
+      setResolvePermission(() => resolver);
+    },
+    [],
+  );
 
   function handleCreateNew() {
     setForceNewSession(true);
@@ -114,6 +127,16 @@ function ConnectedApp({ config }: { config: AcpConnectionConfig }) {
                 workspace={{ path: config.workspace }}
                 sessionId={forceNewSession ? null : sessionList.activeSessionId}
                 onSessionCreated={(id) => handleSelectSession(id)}
+                onPendingPermissionsChange={handlePendingPermissionsChange}
+              />
+            }
+            right={
+              <ContextArea
+                workspacePath={config.workspace}
+                endpoint={config.endpoint}
+                connectionState={connectionState}
+                pendingPermissions={pendingPermissions}
+                onRespondPermission={resolvePermission}
               />
             }
           />
@@ -171,3 +194,5 @@ function ConnectionError({ onRetry }: { onRetry: () => void }) {
     </div>
   );
 }
+
+
