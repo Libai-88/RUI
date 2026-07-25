@@ -165,17 +165,49 @@ test('加载已有 Session', async ({ page }) => {
   await page.click('text=直接连接');
   await expect(page.getByTestId('three-column-layout')).toBeVisible({ timeout: 10000 });
 
-  // Should see session list with at least the "暂无会话" state
-  await expect(page.getByTestId('left-panel')).toBeVisible();
-
   // Create a session
   await page.click('text=新建会话');
   await expect(page.getByPlaceholder(/Enter 发送/)).toBeVisible({ timeout: 5000 });
   await page.fill('textarea', '测试消息');
   await page.click('text=发送');
-
-  // Wait for response
   await page.waitForTimeout(2000);
+
+  // Navigate away by selecting another session (simulate session switching)
+  // The session should appear in the left panel
+  await expect(page.getByTestId('left-panel')).toBeVisible();
+});
+
+// ---------------------------------------------------------------------------
+// 8. Disconnection and recovery
+// ---------------------------------------------------------------------------
+
+test('断线检测与恢复 UI 显示', async ({ page }) => {
+  await page.goto('/');
+
+  await page.fill('#endpoint', `http://127.0.0.1:${mockPort}`);
+  await page.fill('#workspace', 'D:/e2e-recovery-test');
+  await page.click('text=直接连接');
+  await expect(page.getByTestId('three-column-layout')).toBeVisible({ timeout: 10000 });
+
+  // Create session and send message
+  await page.click('text=新建会话');
+  await expect(page.getByPlaceholder(/Enter 发送/)).toBeVisible({ timeout: 5000 });
+  await page.fill('textarea', '测试消息');
+  await page.click('text=发送');
+  await expect(page.getByText('Mock ACP')).toBeVisible({ timeout: 5000 });
+
+  // Trigger disconnect by calling the mock server's disconnect endpoint
+  await page.evaluate(() =>
+    fetch('/disconnect-all', { method: 'POST' }).catch(() => {}),
+  );
+  await page.waitForTimeout(1000);
+
+  // Recovery bar should appear with reconnect and resend buttons
+  await expect(page.getByText(/连接已中断/)).toBeVisible({ timeout: 10000 });
+
+  // Verify the session list still shows the interrupted state
+  await expect(page.getByText(/重连/)).toBeVisible();
+  await expect(page.getByText(/重新发送/)).toBeVisible();
 });
 
 // ---------------------------------------------------------------------------

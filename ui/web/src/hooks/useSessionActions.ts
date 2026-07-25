@@ -1,9 +1,7 @@
 import { useCallback } from 'react';
 import type { AcpAdapter, Message, SessionId, SessionStatus } from '../product/types';
 
-function generateId(prefix: string): string {
-  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-}
+import { generateId } from '../product/id';
 
 export interface SessionActionsResult {
   sendMessage: (content: string) => Promise<void>;

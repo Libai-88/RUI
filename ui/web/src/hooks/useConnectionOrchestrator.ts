@@ -1,14 +1,14 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import type { AcpConnectionConfig, SessionId, PermissionRequest } from '../product/types';
+import type { AcpAdapter, AcpConnectionConfig, SessionId, PermissionRequest } from '../product/types';
 import { WebAcpAdapter } from '../acp/webAcpAdapter';
 import { createGooseClientFactory } from '../acp/gooseClientFactory';
 import { useSessionList } from './useSessionList';
 
-type ConnectionState = 'connecting' | 'connected' | 'error';
+type OrchestratorState = 'connecting' | 'connected' | 'error';
 
 export interface ConnectionOrchestrationResult {
-  adapter: WebAcpAdapter;
-  connectionState: ConnectionState;
+  adapter: AcpAdapter;
+  connectionState: OrchestratorState;
   sessionList: ReturnType<typeof useSessionList>;
   forceNewSession: boolean;
   createNewSession: () => void;
@@ -24,7 +24,7 @@ export interface ConnectionOrchestrationResult {
 
 export function useConnectionOrchestrator(config: AcpConnectionConfig): ConnectionOrchestrationResult {
   const adapter = useMemo(() => new WebAcpAdapter(createGooseClientFactory()), []);
-  const [connectionState, setConnectionState] = useState<ConnectionState>('connecting');
+  const [connectionState, setConnectionState] = useState<OrchestratorState>('connecting');
   const [retryKey, setRetryKey] = useState(0);
   const [forceNewSession, setForceNewSession] = useState(false);
   const [pendingPermissions, setPendingPermissions] = useState<PermissionRequest[]>([]);
@@ -43,6 +43,7 @@ export function useConnectionOrchestrator(config: AcpConnectionConfig): Connecti
       .catch(() => {
         if (!cancelled) setConnectionState('error');
       });
+    return () => { cancelled = true; };
     return () => {
       cancelled = true;
     };

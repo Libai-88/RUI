@@ -420,6 +420,21 @@ function handleStatus(req, res) {
 }
 
 // ---------------------------------------------------------------------------
+// Disconnect endpoint (for E2E testing disconnection recovery)
+// ---------------------------------------------------------------------------
+
+function handleDisconnectAll(req, res) {
+  for (const [connId, conn] of connections) {
+    for (const stream of conn.streams) {
+      try { stream.end(); } catch {}
+    }
+  }
+  connections.clear();
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({ disconnected: true }));
+}
+
+// ---------------------------------------------------------------------------
 // Server
 // ---------------------------------------------------------------------------
 
@@ -441,6 +456,7 @@ export function createMockServer(port = 0) {
 
     try {
       if (path === '/status') return handleStatus(req, res);
+      if (path === '/disconnect-all') return handleDisconnectAll(req, res);
       if (path === '/acp') {
         if (req.method === 'POST') {
           // Check if this is an initialize (no connection id yet)

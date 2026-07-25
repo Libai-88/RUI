@@ -20,6 +20,13 @@ export default defineConfig({
         },
       },
     },
+    {
+      name: 'Microsoft Edge',
+      use: {
+        browserName: 'chromium',
+        channel: 'msedge',
+      },
+    },
   ],
   webServer: [
     {

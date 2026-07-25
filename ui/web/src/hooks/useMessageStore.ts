@@ -6,9 +6,7 @@ import {
   markInterrupted,
 } from '../chat/messageAccumulator';
 
-function generateId(prefix: string): string {
-  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-}
+import { generateId } from '../product/id';
 
 export interface MessageStoreResult {
   messages: Message[];
