@@ -65,7 +65,7 @@ export function SessionList({
           borderBottom: '1px solid #e5e7eb',
         }}
       >
-        <button type="button" onClick={onCreateNew} style={newSessionBtnStyle}>
+        <button type="button" data-shortcut="new-session" onClick={onCreateNew} style={newSessionBtnStyle}>
           新建会话
         </button>
         <button type="button" onClick={onRefresh} style={refreshBtnStyle}>

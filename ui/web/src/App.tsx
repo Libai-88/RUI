@@ -71,6 +71,20 @@ function ConnectedApp({ config }: { config: AcpConnectionConfig }) {
   const sessionList = useSessionList(
     connectionState === 'connected' ? adapter : null,
   );
+
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+        e.preventDefault();
+        handleCreateNew();
+        document
+          .querySelector<HTMLButtonElement>('[data-shortcut="new-session"]')
+          ?.focus();
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  });
   const [forceNewSession, setForceNewSession] = useState(false);
   const [pendingPermissions, setPendingPermissions] = useState<PermissionRequest[]>([]);
   const [resolvePermission, setResolvePermission] = useState<(requestId: string, allowed: boolean, scope?: 'once' | 'always') => Promise<void>>(
