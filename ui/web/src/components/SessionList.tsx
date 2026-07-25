@@ -1,4 +1,5 @@
 import type { SessionSummary, SessionId, SessionStatus } from '../product/types';
+import { t } from '../product/i18n';
 
 function formatDate(iso: string): string {
   if (!iso) return '';
@@ -8,8 +9,8 @@ function formatDate(iso: string): string {
 }
 
 function StatusBadge({ status }: { status: SessionStatus }) {
-  const { label, style } = statusConfig[status] ?? statusConfig.idle;
-  return <span style={{ ...statusBadgeBaseStyle, ...style }}>{label}</span>;
+  const { labelKey, style } = statusConfig[status] ?? statusConfig.idle;
+  return <span style={{ ...statusBadgeBaseStyle, ...style }}>{t(labelKey)}</span>;
 }
 
 const statusBadgeBaseStyle: React.CSSProperties = {
@@ -19,13 +20,13 @@ const statusBadgeBaseStyle: React.CSSProperties = {
   fontWeight: 500,
 };
 
-const statusConfig: Record<SessionStatus, { label: string; style: React.CSSProperties }> = {
-  idle: { label: '空闲', style: { background: '#e5e7eb', color: '#4b5563' } },
-  streaming: { label: '生成中', style: { background: '#dbeafe', color: '#1e40af' } },
-  'waiting-for-permission': { label: '待权限', style: { background: '#fef3c7', color: '#92400e' } },
-  cancelled: { label: '已取消', style: { background: '#f3f4f6', color: '#6b7280' } },
-  error: { label: '错误', style: { background: '#fee2e2', color: '#991b1b' } },
-  interrupted: { label: '已中断', style: { background: '#fef3c7', color: '#b45309' } },
+const statusConfig: Record<SessionStatus, { labelKey: string; style: React.CSSProperties }> = {
+  idle: { labelKey: 'session.status.idle', style: { background: '#e5e7eb', color: '#4b5563' } },
+  streaming: { labelKey: 'session.status.streaming', style: { background: '#dbeafe', color: '#1e40af' } },
+  'waiting-for-permission': { labelKey: 'session.status.waiting-permission', style: { background: '#fef3c7', color: '#92400e' } },
+  cancelled: { labelKey: 'session.status.cancelled', style: { background: '#f3f4f6', color: '#6b7280' } },
+  error: { labelKey: 'session.status.error', style: { background: '#fee2e2', color: '#991b1b' } },
+  interrupted: { labelKey: 'session.status.interrupted', style: { background: '#fef3c7', color: '#b45309' } },
 };
 
 export function SessionList({
@@ -66,17 +67,17 @@ export function SessionList({
         }}
       >
         <button type="button" data-shortcut="new-session" onClick={onCreateNew} style={newSessionBtnStyle}>
-          新建会话
+          {t('session.new')}
         </button>
         <button type="button" onClick={onRefresh} style={refreshBtnStyle}>
-          刷新
+          {t('session.refresh')}
         </button>
-        {loading && <div style={{ fontSize: 12, color: '#666' }}>加载中…</div>}
+        {loading && <div style={{ fontSize: 12, color: '#666' }}>{t('session.loading')}</div>}
       </div>
       <div style={{ flex: 1, overflowY: 'auto' }}>
         {sessions.length === 0 ? (
           <div style={{ padding: '16px 12px', color: '#999', textAlign: 'center', fontSize: 13 }}>
-            暂无会话
+            {t('session.empty')}
           </div>
         ) : (
           sessions.map((s) => {
@@ -90,7 +91,7 @@ export function SessionList({
                 onClick={() => onSelect(s.id)}
                 style={itemStyle(isActive)}
               >
-                <div style={titleStyle}>{s.title || '未命名会话'}</div>
+                <div style={titleStyle}>{s.title || t('session.unnamed')}</div>
                 {s.description && <div style={descStyle}>{s.description}</div>}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <span style={dateStyle}>{formatDate(s.updatedAt)}</span>

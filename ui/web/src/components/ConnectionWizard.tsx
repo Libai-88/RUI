@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { AcpConnectionConfig } from '../product/types';
 import { testConnection, type ConnectionTestResult } from '../connection/connectionTest';
+import { t } from '../product/i18n';
 
 /** 连接向导组件 */
 export function ConnectionWizard({
@@ -65,13 +66,13 @@ export function ConnectionWizard({
     <div style={{ maxWidth: 480, margin: '80px auto', padding: '0 24px' }}>
       <h1 style={{ textAlign: 'center', marginBottom: 8 }}>RUI</h1>
       <p style={{ textAlign: 'center', color: '#666', marginBottom: 32 }}>
-        连接到 Goose ACP 服务
+        {t('connection.wizard.title')}
       </p>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
         <div>
           <label htmlFor="endpoint" style={{ display: 'block', marginBottom: 4 }}>
-            ACP 地址 <span style={{ color: '#e53e3e' }}>*</span>
+            {t('connection.wizard.endpoint.label')} <span style={{ color: '#e53e3e' }}>*</span>
           </label>
           <input
             id="endpoint"
@@ -86,14 +87,14 @@ export function ConnectionWizard({
 
         <div>
           <label htmlFor="secretKey" style={{ display: 'block', marginBottom: 4 }}>
-            Secret Key（可选）
+            {t('connection.wizard.secretKey.label')}
           </label>
           <input
             id="secretKey"
             type="password"
             value={secretKey}
             onChange={(e) => setSecretKey(e.target.value)}
-            placeholder="留空表示无认证"
+            placeholder={t('connection.wizard.secretKey.placeholder')}
             style={inputStyle}
             disabled={connected}
           />
@@ -101,7 +102,7 @@ export function ConnectionWizard({
 
         <div>
           <label htmlFor="workspace" style={{ display: 'block', marginBottom: 4 }}>
-            工作目录 <span style={{ color: '#e53e3e' }}>*</span>
+            {t('connection.wizard.workspace.label')} <span style={{ color: '#e53e3e' }}>*</span>
           </label>
           <input
             id="workspace"
@@ -136,7 +137,7 @@ export function ConnectionWizard({
             disabled={testing || connected || !endpoint.trim()}
             style={buttonStyle}
           >
-            {testing ? '测试中…' : '测试连接'}
+            {testing ? t('connection.wizard.testing') : t('connection.wizard.test')}
           </button>
           <button
             type="button"
@@ -144,7 +145,7 @@ export function ConnectionWizard({
             disabled={!endpoint.trim() || connected}
             style={{ ...buttonStyle, background: '#3182ce', color: '#fff' }}
           >
-            直接连接
+            {t('connection.wizard.connect')}
           </button>
         </div>
       </div>

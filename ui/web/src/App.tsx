@@ -9,6 +9,8 @@ import { WebAcpAdapter } from './acp/webAcpAdapter';
 import { createGooseClientFactory } from './acp/gooseClientFactory';
 import { ThreeColumnLayout } from './components/ThreeColumnLayout';
 import { ContextArea } from './components/ContextArea';
+import { t } from './product/i18n';
+import { brand } from './product/brand';
 
 type ConnectionState = 'connecting' | 'connected' | 'error';
 
@@ -18,6 +20,10 @@ type ConnectionState = 'connecting' | 'connected' | 'error';
  * 首次进入时显示连接向导，完成连接后显示主界面。
  */
 export function App() {
+  useEffect(() => {
+    document.title = brand.name;
+  }, []);
+
   const [config, setConfig] = useState<AcpConnectionConfig | null>(null);
   const [loaded, setLoaded] = useState(false);
 
@@ -112,13 +118,13 @@ function ConnectedApp({ config }: { config: AcpConnectionConfig }) {
   return (
     <div style={{ display: 'flex', height: '100vh', flexDirection: 'column' }}>
       <header style={{ padding: '8px 16px', borderBottom: '1px solid #e5e7eb' }}>
-        <strong>RUI</strong>
+        <strong>{t('header.title')}</strong>
         <span style={{ marginLeft: 12, color: '#666', fontSize: 14 }}>
           {config.endpoint}
         </span>
       </header>
       <main style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
-        {connectionState === 'connecting' && <CenteredHint text="正在连接…" />}
+        {connectionState === 'connecting' && <CenteredHint text={t('app.loading')} />}
         {connectionState === 'error' && (
           <ConnectionError onRetry={() => setRetryKey((k) => k + 1)} />
         )}
@@ -189,7 +195,7 @@ function ConnectionError({ onRetry }: { onRetry: () => void }) {
         color: '#c53030',
       }}
     >
-      <div>连接 ACP 服务失败</div>
+      <div>{t('connection.error.title')}</div>
       <button
         type="button"
         onClick={onRetry}
@@ -203,7 +209,7 @@ function ConnectionError({ onRetry }: { onRetry: () => void }) {
           fontSize: 14,
         }}
       >
-        重试
+        {t('connection.error.retry')}
       </button>
     </div>
   );

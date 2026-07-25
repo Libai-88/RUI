@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { AcpAdapter, Workspace, SessionId, PermissionRequest } from '../product/types';
 import { useChat } from '../hooks/useChat';
+import { t } from '../product/i18n';
 import { MessageList } from './MessageList';
 import { MessageInput } from './MessageInput';
 
@@ -78,7 +79,7 @@ export function ChatView({
   if (loading) {
     return (
       <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#666' }}>
-        正在创建会话…
+        {t('chat.creating')}
       </div>
     );
   }
@@ -96,7 +97,7 @@ export function ChatView({
           color: '#c53030',
         }}
       >
-        <div>会话创建失败：{error}</div>
+        <div>{t('chat.create.failed')}{error}</div>
         <button
           type="button"
           onClick={handleRetry}
@@ -110,7 +111,7 @@ export function ChatView({
             fontSize: 14,
           }}
         >
-          重试
+          {t('chat.retry')}
         </button>
       </div>
     );
@@ -170,21 +171,21 @@ function ChatSession({
           color: '#666',
         }}
       >
-        工作目录：{workspace.path}
+        {t('chat.workspace.label', { path: workspace.path })}
       </div>
       <div style={{ flex: 1, overflow: 'auto' }}>
         <MessageList messages={messages} onRespondPermission={resolvePermission} />
       </div>
       {status === 'interrupted' && (
         <div style={recoveryBarStyle}>
-          <span style={{ fontSize: 13 }}>连接已中断，已接收内容已保留</span>
+          <span style={{ fontSize: 13 }}>{t('chat.recovery.title')}</span>
           <div style={{ display: 'flex', gap: 8 }}>
             <button
               type="button"
               onClick={continueFromBreakpoint}
               style={continueFromBreakpointBtnStyle}
             >
-              从断点继续
+              {t('chat.recovery.continue')}
             </button>
             <button
               type="button"
@@ -192,14 +193,14 @@ function ChatSession({
               disabled={!adapter.reconnect}
               style={reconnectBtnStyle}
             >
-              重连
+              {t('chat.recovery.reconnect')}
             </button>
             <button
               type="button"
               onClick={resendLastMessage}
               style={resendBtnStyle}
             >
-              重新发送
+              {t('chat.recovery.resend')}
             </button>
           </div>
         </div>

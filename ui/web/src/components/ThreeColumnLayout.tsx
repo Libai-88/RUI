@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { useViewportBreakpoint } from '../hooks/useViewportBreakpoint';
+import { t } from '../product/i18n';
 
 export interface ThreeColumnLayoutProps {
   left: ReactNode;
@@ -88,7 +89,7 @@ export function ThreeColumnLayout({ left, center, right }: ThreeColumnLayoutProp
             aria-expanded={!collapsed.left}
             aria-controls="three-column-left-panel"
           >
-            {collapsed.left ? '展开左栏' : '收起左栏'}
+            {collapsed.left ? t('panel.left.expand') : t('panel.left.collapse')}
           </button>
           {hasRight && (
             <button
@@ -98,7 +99,7 @@ export function ThreeColumnLayout({ left, center, right }: ThreeColumnLayoutProp
               aria-expanded={!collapsed.right}
               aria-controls="three-column-right-panel"
             >
-              {collapsed.right ? '展开右栏' : '收起右栏'}
+              {collapsed.right ? t('panel.right.expand') : t('panel.right.collapse')}
             </button>
           )}
         </div>

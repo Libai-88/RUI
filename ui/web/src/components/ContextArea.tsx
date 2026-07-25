@@ -1,4 +1,5 @@
 import type { PermissionRequest } from '../product/types';
+import { t } from '../product/i18n';
 
 export interface ContextAreaProps {
   workspacePath: string;
@@ -112,10 +113,10 @@ export function ContextArea({
   const isError = connectionState === 'error';
 
   const statusText = isConnecting
-    ? '连接中…'
+    ? t('context.connection.connecting')
     : isError
-      ? '连接失败'
-      : '已连接';
+      ? t('context.connection.failed')
+      : t('context.connection.connected');
 
   return (
     <div
@@ -129,9 +130,9 @@ export function ContextArea({
     >
       {/* Workspace */}
       <div style={sectionStyle}>
-        <div style={sectionHeaderStyle}>工作区</div>
+        <div style={sectionHeaderStyle}>{t('context.section.workspace')}</div>
         <div style={entryStyle}>
-          <span style={labelStyle}>路径</span>
+          <span style={labelStyle}>{t('context.workspace.path')}</span>
           <span style={valueStyle} title={workspacePath} data-testid="context-workspace-path">
             {workspacePath}
           </span>
@@ -142,23 +143,23 @@ export function ContextArea({
 
       {/* Provider */}
       <div style={sectionStyle}>
-        <div style={sectionHeaderStyle}>Provider</div>
+        <div style={sectionHeaderStyle}>{t('context.section.provider')}</div>
         <div style={entryStyle}>
-          <span style={labelStyle}>Provider</span>
+          <span style={labelStyle}>{t('context.provider.name')}</span>
           <span style={valueStyle} data-testid="context-provider-name">
-            {providerLabel ?? '待获取'}
+            {providerLabel ?? t('context.provider.unknown')}
           </span>
         </div>
         <div style={entryStyle}>
-          <span style={labelStyle}>模型</span>
+          <span style={labelStyle}>{t('context.provider.model')}</span>
           <span style={valueStyle} data-testid="context-model-name">
-            {modelLabel ?? '待获取'}
+            {modelLabel ?? t('context.provider.unknown')}
           </span>
         </div>
         <div style={{ ...entryStyle, cursor: 'not-allowed', opacity: 0.6 }}>
           <div>
-            <span style={clickableEntryStyle}>配置编辑</span>
-            <span style={comingSoonBadgeStyle}>即将推出</span>
+            <span style={clickableEntryStyle}>{t('context.provider.edit')}</span>
+            <span style={comingSoonBadgeStyle}>{t('context.coming.soon')}</span>
           </div>
         </div>
       </div>
@@ -167,7 +168,7 @@ export function ContextArea({
 
       {/* 连接状态 */}
       <div style={sectionStyle}>
-        <div style={sectionHeaderStyle}>连接状态</div>
+        <div style={sectionHeaderStyle}>{t('context.section.connection')}</div>
         <div style={statusRowStyle}>
           <span style={statusDot(isConnected, isConnecting)} />
           <span>
@@ -186,7 +187,7 @@ export function ContextArea({
       {/* 待处理权限 */}
       <div style={sectionStyle}>
         <div style={sectionHeaderStyle}>
-          待处理权限
+          {t('context.section.permissions')}
           {pendingPermissions.length > 0 && (
             <span
               style={{
@@ -208,7 +209,7 @@ export function ContextArea({
             style={{ color: '#9ca3af', fontSize: 12, padding: '4px 0' }}
             data-testid="context-no-permissions"
           >
-            无待处理权限
+            {t('context.permissions.none')}
           </div>
         ) : (
           <div>
@@ -250,7 +251,7 @@ export function ContextArea({
                       color: '#fff',
                     }}
                   >
-                    允许
+                    {t('permission.allow')}
                   </button>
                   <button
                     type="button"
@@ -263,7 +264,7 @@ export function ContextArea({
                       color: '#fff',
                     }}
                   >
-                    始终允许
+                    {t('permission.always.allow')}
                   </button>
                   <button
                     type="button"
@@ -277,7 +278,7 @@ export function ContextArea({
                       border: '1px solid #e53e3e',
                     }}
                   >
-                    拒绝
+                    {t('permission.deny')}
                   </button>
                   <button
                     type="button"
@@ -291,7 +292,7 @@ export function ContextArea({
                       border: '1px solid #c53030',
                     }}
                   >
-                    始终拒绝
+                    {t('permission.always.deny')}
                   </button>
                 </div>
               </div>
@@ -304,12 +305,12 @@ export function ContextArea({
 
       {/* 即将推出 */}
       <div style={sectionStyle}>
-        <div style={sectionHeaderStyle}>扩展</div>
+        <div style={sectionHeaderStyle}>{t('context.section.extensions')}</div>
         <div style={comingSoonItemStyle}>
-          MCP 扩展<span style={comingSoonBadgeStyle}>即将推出</span>
+          {t('context.extensions.mcp')}<span style={comingSoonBadgeStyle}>{t('context.coming.soon')}</span>
         </div>
         <div style={comingSoonItemStyle}>
-          Recipe<span style={comingSoonBadgeStyle}>即将推出</span>
+          {t('context.extensions.recipe')}<span style={comingSoonBadgeStyle}>{t('context.coming.soon')}</span>
         </div>
       </div>
     </div>

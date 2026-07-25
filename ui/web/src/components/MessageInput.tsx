@@ -1,5 +1,6 @@
 import { useState, type KeyboardEvent } from 'react';
 import type { SessionStatus } from '../product/types';
+import { t } from '../product/i18n';
 
 export function MessageInput({
   status,
@@ -79,7 +80,7 @@ export function MessageInput({
           onClick={handleCancel}
           style={{ ...buttonStyle, background: '#e53e3e', color: '#fff' }}
         >
-          取消
+          {t('chat.cancel')}
         </button>
       ) : (
         <button
@@ -93,7 +94,7 @@ export function MessageInput({
             cursor: canSend ? 'pointer' : 'not-allowed',
           }}
         >
-          发送
+          {t('chat.send')}
         </button>
       )}
     </div>

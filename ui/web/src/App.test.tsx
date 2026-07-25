@@ -20,7 +20,7 @@ describe('App', () => {
 
   it('无配置时显示连接向导', () => {
     render(<App />);
-    expect(screen.getByText('连接到 Goose ACP 服务')).toBeInTheDocument();
+    expect(screen.getByText('连接到 ACP 服务')).toBeInTheDocument();
   });
 
   it('有配置时连接并显示工作台', async () => {
