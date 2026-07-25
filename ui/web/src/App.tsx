@@ -1,18 +1,14 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
-import type { AcpConnectionConfig, SessionId, PermissionRequest } from './product/types';
+import { useState, useEffect } from 'react';
+import type { AcpConnectionConfig } from './product/types';
 import { loadConnectionConfig, saveConnectionConfig } from './connection/connectionConfig';
 import { ConnectionWizard } from './components/ConnectionWizard';
 import { ChatView } from './components/ChatView';
 import { SessionList } from './components/SessionList';
-import { useSessionList } from './hooks/useSessionList';
-import { WebAcpAdapter } from './acp/webAcpAdapter';
-import { createGooseClientFactory } from './acp/gooseClientFactory';
+import { useConnectionOrchestrator } from './hooks/useConnectionOrchestrator';
 import { ThreeColumnLayout } from './components/ThreeColumnLayout';
 import { ContextArea } from './components/ContextArea';
 import { t } from './product/i18n';
 import { brand } from './product/brand';
-
-type ConnectionState = 'connecting' | 'connected' | 'error';
 
 /**
  * RUI Web 应用根组件
@@ -50,70 +46,18 @@ export function App() {
 }
 
 function ConnectedApp({ config }: { config: AcpConnectionConfig }) {
-  const adapter = useMemo(
-    () => new WebAcpAdapter(createGooseClientFactory()),
-    [],
-  );
-  const [connectionState, setConnectionState] =
-    useState<ConnectionState>('connecting');
-  const [retryKey, setRetryKey] = useState(0);
-
-  useEffect(() => {
-    let cancelled = false;
-    setConnectionState('connecting');
-    adapter
-      .connect(config)
-      .then(() => {
-        if (!cancelled) setConnectionState('connected');
-      })
-      .catch(() => {
-        if (!cancelled) setConnectionState('error');
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [adapter, config, retryKey]);
-
-  const sessionList = useSessionList(
-    connectionState === 'connected' ? adapter : null,
-  );
-
-  useEffect(() => {
-    function handleKeyDown(e: KeyboardEvent) {
-      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
-        e.preventDefault();
-        handleCreateNew();
-        document
-          .querySelector<HTMLButtonElement>('[data-shortcut="new-session"]')
-          ?.focus();
-      }
-    }
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  });
-  const [forceNewSession, setForceNewSession] = useState(false);
-  const [pendingPermissions, setPendingPermissions] = useState<PermissionRequest[]>([]);
-  const [resolvePermission, setResolvePermission] = useState<(requestId: string, allowed: boolean, scope?: 'once' | 'always') => Promise<void>>(
-    async () => {},
-  );
-
-  const handlePendingPermissionsChange = useCallback(
-    (perms: PermissionRequest[], resolver: (requestId: string, allowed: boolean, scope?: 'once' | 'always') => Promise<void>) => {
-      setPendingPermissions(perms);
-      setResolvePermission(() => resolver);
-    },
-    [],
-  );
-
-  function handleCreateNew() {
-    setForceNewSession(true);
-    void sessionList.createNewSession();
-  }
-
-  function handleSelectSession(sessionId: SessionId) {
-    setForceNewSession(false);
-    void sessionList.selectSession(sessionId);
-  }
+  const {
+    adapter,
+    connectionState,
+    sessionList,
+    forceNewSession,
+    createNewSession,
+    selectSession,
+    retry,
+    pendingPermissions,
+    resolvePermission,
+    handlePendingPermissionsChange,
+  } = useConnectionOrchestrator(config);
 
   return (
     <div style={{ display: 'flex', height: '100vh', flexDirection: 'column' }}>
@@ -125,9 +69,7 @@ function ConnectedApp({ config }: { config: AcpConnectionConfig }) {
       </header>
       <main style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
         {connectionState === 'connecting' && <CenteredHint text={t('app.loading')} />}
-        {connectionState === 'error' && (
-          <ConnectionError onRetry={() => setRetryKey((k) => k + 1)} />
-        )}
+        {connectionState === 'error' && <ConnectionError onRetry={retry} />}
         {connectionState === 'connected' && (
           <ThreeColumnLayout
             left={
@@ -136,8 +78,8 @@ function ConnectedApp({ config }: { config: AcpConnectionConfig }) {
                 activeSessionId={sessionList.activeSessionId}
                 loadingSessionId={sessionList.loadingSessionId}
                 loading={sessionList.loading}
-                onSelect={handleSelectSession}
-                onCreateNew={handleCreateNew}
+                onSelect={selectSession}
+                onCreateNew={createNewSession}
                 onRefresh={sessionList.refresh}
               />
             }
@@ -146,7 +88,7 @@ function ConnectedApp({ config }: { config: AcpConnectionConfig }) {
                 adapter={adapter}
                 workspace={{ path: config.workspace }}
                 sessionId={forceNewSession ? null : sessionList.activeSessionId}
-                onSessionCreated={(id) => handleSelectSession(id)}
+                onSessionCreated={selectSession}
                 onPendingPermissionsChange={handlePendingPermissionsChange}
               />
             }
