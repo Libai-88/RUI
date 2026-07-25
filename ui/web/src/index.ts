@@ -20,7 +20,7 @@ export { createGooseClientFactory } from './acp/gooseClientFactory';
 export { loadConnectionConfig, saveConnectionConfig, clearConnectionConfig, hasConnectionConfig } from './connection/connectionConfig';
 export { ConnectionStateManager, states } from './connection/connectionStateMachine';
 export { testConnection } from './connection/connectionTest';
-export { accumulateChunk, finalizeMessage, markInterrupted, accumulateThoughtChunk, finalizeThought } from './chat/messageAccumulator';
+export { accumulateContent, finalizeContent, markInterrupted } from './chat/messageAccumulator';
 export type {
   AcpAdapter,
   AcpConnectionConfig,

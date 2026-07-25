@@ -1,79 +1,51 @@
-import type { Message, AssistantMessage, ThoughtMessage, MessageId, SessionId } from '../product/types';
+import type { Message, AssistantMessage, ThoughtMessage, MessageId } from '../product/types';
 
-/** 累积流式 chunk 到消息列表 */
-export function accumulateChunk(
+type StreamingRole = 'assistant' | 'thought';
+
+function createStreamingMessage(
+  messageId: MessageId,
+  delta: string,
+  role: StreamingRole,
+): AssistantMessage | ThoughtMessage {
+  const base = { id: messageId, content: delta, isStreaming: true, createdAt: new Date().toISOString() };
+  return role === 'assistant'
+    ? { ...base, role: 'assistant' as const }
+    : { ...base, role: 'thought' as const };
+}
+
+/** 累积流式 chunk 到消息列表（assistant 或 thought） */
+export function accumulateContent(
   messages: Message[],
-  event: { sessionId: SessionId; messageId: MessageId; delta: string },
+  messageId: MessageId,
+  delta: string,
+  role: StreamingRole,
 ): Message[] {
   const existing = messages.find(
-    (m): m is AssistantMessage =>
-      m.role === 'assistant' && m.id === event.messageId,
+    (m): m is AssistantMessage | ThoughtMessage =>
+      m.role === role && m.id === messageId,
   );
   if (existing) {
     return messages.map((m) =>
       m === existing
-        ? { ...m, content: m.content + event.delta, isStreaming: true }
+        ? { ...m, content: m.content + delta, isStreaming: true }
         : m,
     );
   }
-  const newMessage: AssistantMessage = {
-    id: event.messageId,
-    role: 'assistant',
-    content: event.delta,
-    isStreaming: true,
-    createdAt: new Date().toISOString(),
-  };
-  return [...messages, newMessage];
+  return [...messages, createStreamingMessage(messageId, delta, role)];
 }
 
-/** 累积思考 chunk 到消息列表 */
-export function accumulateThoughtChunk(
-  messages: Message[],
-  event: { sessionId: SessionId; messageId: MessageId; delta: string },
-): Message[] {
-  const existing = messages.find(
-    (m): m is ThoughtMessage =>
-      m.role === 'thought' && m.id === event.messageId,
-  );
-  if (existing) {
-    return messages.map((m) =>
-      m === existing
-        ? { ...m, content: m.content + event.delta, isStreaming: true }
-        : m,
-    );
-  }
-  const newMessage: ThoughtMessage = {
-    id: event.messageId,
-    role: 'thought',
-    content: event.delta,
-    isStreaming: true,
-    createdAt: new Date().toISOString(),
-  };
-  return [...messages, newMessage];
-}
-
-/** 标记流式消息为完成 */
-export function finalizeMessage(
+/** 标记流式消息为完成（assistant 或 thought） */
+export function finalizeContent(
   messages: Message[],
   messageId: MessageId,
+  role?: StreamingRole,
 ): Message[] {
-  return messages.map((m) =>
-    m.role === 'assistant' && m.id === messageId
-      ? { ...m, isStreaming: false }
-      : m,
-  );
-}
-
-/** 标记思考消息为完成 */
-export function finalizeThought(
-  messages: Message[],
-  messageId: MessageId,
-): Message[] {
-  return messages.map((m) =>
-    m.role === 'thought' && m.id === messageId
-      ? { ...m, isStreaming: false }
-      : m,
-  );
+  return messages.map((m) => {
+    if (m.id !== messageId) return m;
+    if (role && m.role !== role) return m;
+    if (m.role !== 'assistant' && m.role !== 'thought') return m;
+    return { ...m, isStreaming: false };
+  });
 }
 
 /** 标记消息为连接中断（停止流式光标但保留已接收内容） */

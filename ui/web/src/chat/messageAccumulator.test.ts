@@ -1,14 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { accumulateChunk, finalizeMessage, markInterrupted } from './messageAccumulator';
+import { accumulateContent, finalizeContent, markInterrupted } from './messageAccumulator';
 import type { Message } from '../product/types';
 
 describe('messageAccumulator', () => {
   it('首个 chunk 创建新的流式助手消息', () => {
-    const result = accumulateChunk([], {
-      sessionId: 's1',
-      messageId: 'm1',
-      delta: '你好',
-    });
+    const result = accumulateContent([], 'm1', '你好', 'assistant');
     expect(result.length).toBe(1);
     expect(result[0].role).toBe('assistant');
     if (result[0].role === 'assistant') {
@@ -28,11 +24,7 @@ describe('messageAccumulator', () => {
         createdAt: '2026-01-01T00:00:00.000Z',
       },
     ];
-    const result = accumulateChunk(existing, {
-      sessionId: 's1',
-      messageId: 'm1',
-      delta: '！',
-    });
+    const result = accumulateContent(existing, 'm1', '！', 'assistant');
     expect(result.length).toBe(1);
     if (result[0].role === 'assistant') {
       expect(result[0].content).toBe('你好！');
@@ -50,11 +42,7 @@ describe('messageAccumulator', () => {
         createdAt: '2026-01-01T00:00:00.000Z',
       },
     ];
-    const result = accumulateChunk(existing, {
-      sessionId: 's1',
-      messageId: 'm2',
-      delta: '新消息',
-    });
+    const result = accumulateContent(existing, 'm2', '新消息', 'assistant');
     expect(result.length).toBe(2);
     expect(result[1].role).toBe('assistant');
     if (result[1].role === 'assistant') {
@@ -73,7 +61,7 @@ describe('messageAccumulator', () => {
         createdAt: '2026-01-01T00:00:00.000Z',
       },
     ];
-    const result = finalizeMessage(existing, 'm1');
+    const result = finalizeContent(existing, 'm1', 'assistant');
     if (result[0].role === 'assistant') {
       expect(result[0].isStreaming).toBe(false);
     }
@@ -96,7 +84,7 @@ describe('messageAccumulator', () => {
         createdAt: '2026-01-01T00:00:01.000Z',
       },
     ];
-    const result = finalizeMessage(existing, 'm2');
+    const result = finalizeContent(existing, 'm2', 'assistant');
     if (result[0].role === 'assistant') {
       expect(result[0].isStreaming).toBe(true);
     }
@@ -143,5 +131,39 @@ describe('messageAccumulator', () => {
     if (result[0].role === 'assistant') {
       expect(result[0].isStreaming).toBe(true);
     }
+  });
+
+  it('accumulateContent for thought role creates thought message', () => {
+    const result = accumulateContent([], 't1', '思考中', 'thought');
+    expect(result.length).toBe(1);
+    expect(result[0].role).toBe('thought');
+    if (result[0].role === 'thought') {
+      expect(result[0].id).toBe('t1');
+      expect(result[0].content).toBe('思考中');
+      expect(result[0].isStreaming).toBe(true);
+    }
+  });
+
+  it('accumulateContent for thought appends to existing thought', () => {
+    const existing: Message[] = [
+      { id: 't1', role: 'thought', content: '思考', isStreaming: true, createdAt: '' },
+    ];
+    const result = accumulateContent(existing, 't1', '继续', 'thought');
+    expect(result.length).toBe(1);
+    if (result[0].role === 'thought') {
+      expect(result[0].content).toBe('思考继续');
+    }
+  });
+
+  it('finalizeContent without role filter finalizes both assistant and thought', () => {
+    const existing: Message[] = [
+      { id: 'a1', role: 'assistant', content: '', isStreaming: true, createdAt: '' },
+      { id: 't1', role: 'thought', content: '', isStreaming: true, createdAt: '' },
+    ];
+    const result = finalizeContent(existing, 'a1');
+    expect(result[0].role).toBe('assistant');
+    if (result[0].role === 'assistant') expect(result[0].isStreaming).toBe(false);
+    expect(result[1].role).toBe('thought');
+    if (result[1].role === 'thought') expect(result[1].isStreaming).toBe(true);
   });
 });

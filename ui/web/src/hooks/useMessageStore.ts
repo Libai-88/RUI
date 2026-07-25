@@ -1,11 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import type { AcpAdapter, Message, SessionId, SessionStatus } from '../product/types';
 import {
-  accumulateChunk,
-  finalizeMessage,
+  accumulateContent,
+  finalizeContent,
   markInterrupted,
-  accumulateThoughtChunk,
-  finalizeThought,
 } from '../chat/messageAccumulator';
 
 function generateId(prefix: string): string {
@@ -49,12 +47,12 @@ export function useMessageStore(
 
       switch (event.type) {
         case 'message-chunk':
-          setMessages((prev) => accumulateChunk(prev, event));
+          setMessages((prev) => accumulateContent(prev, event.messageId, event.delta, 'assistant'));
           break;
 
         case 'message-complete':
-          setMessages((prev) => finalizeMessage(prev, event.messageId));
-          setMessages((prev) => finalizeThought(prev, `thought-${sessionId}`));
+          setMessages((prev) => finalizeContent(prev, event.messageId, 'assistant'));
+          setMessages((prev) => finalizeContent(prev, `thought-${sessionId}`, 'thought'));
           setStatus('idle');
           break;
 
@@ -66,7 +64,7 @@ export function useMessageStore(
                 : m,
             ),
           );
-          setMessages((prev) => finalizeThought(prev, `thought-${sessionId}`));
+          setMessages((prev) => finalizeContent(prev, `thought-${sessionId}`, 'thought'));
           setStatus('idle');
           break;
 
@@ -76,7 +74,7 @@ export function useMessageStore(
 
         case 'connection-interrupted':
           setMessages((prev) => markInterrupted(prev, event.messageId));
-          setMessages((prev) => finalizeThought(prev, `thought-${sessionId}`));
+          setMessages((prev) => finalizeContent(prev, `thought-${sessionId}`, 'thought'));
           setStatus('interrupted');
           break;
 
@@ -160,11 +158,11 @@ export function useMessageStore(
           break;
 
         case 'thought-chunk':
-          setMessages((prev) => accumulateThoughtChunk(prev, event));
+          setMessages((prev) => accumulateContent(prev, event.messageId, event.delta, 'thought'));
           break;
 
         case 'thought-complete':
-          setMessages((prev) => finalizeThought(prev, event.messageId));
+          setMessages((prev) => finalizeContent(prev, event.messageId, 'thought'));
           break;
       }
     });
